@@ -1,0 +1,96 @@
+
+import ImageColor
+
+RED   = "#ff0000"
+YELLOW = "#ffff00"
+WHITE = "#ffffff"
+BLACK = "#000000"
+GREY =  "#808080"
+GREEN =  "#00ff00"
+BLUE = "#0000ff"
+
+TAN = "#DFDDAE"
+OUTLINE_TAN = "#F5F4E7"
+AXIS_COLOR = "#A3A2A3"
+DOT_COLOR = "#DDDDDC"
+SEP_PIE_COLOR = "#637C55"
+
+CAMO_GREEN = "#88886C"
+LIGHT_GREEN = "#A6C98B"
+DARK_GREEN = "#446E45"
+LAVENDER = "#CEA7CE"
+MUSTARD = "#EADC75"
+SALMON = "#EAA774"
+GIRL_PINK = "#F08CA3"
+BOY_TEAL = "#91D4D2"
+GIRL_ORANGE = "#E7917F"
+DARK_PURPLE = "#7A80A2"
+BLUE_GREEN = "#76D79C"
+COUNTY_BLUE = "#316AFF"
+CITY_ORANGE = "#FF8E44"
+WHITE_GREEN = "#9ECB87"
+BLACK_ORANGE = "#F3A772"
+AMERICAN_YELLOW = "#EADE6F"
+ASIAN_BROWN = "#87896B"
+HAWAIIAN_PINK = "#D5A5D0"
+OTHER_GREEN = "#397042"
+MULTIPLE_PURPLE = "#7A7FA3"
+UNSERVED_GREEN = "#8BB987"
+SERVED_PURPLE = "#647695"
+NOT_ELIGIBLE_PURPLE = "#8F86EA"
+ELIGIBLE_MAROON = "#B23F72"
+FIFTY_NINE_DARK_GREEN = "#155D38"
+EIGHTY_FIVE_BROWN = "#5E6E57"
+EIGHTY_FOUR_TAN = "#C4C996"
+TWENTY_GREEN = "#008F17"
+SEVENTEEN_GREEN = "#6DAF71"
+COUNT_LIGHT_GREEN = "#EEF0D7"
+COUNT_DARK_GREEN = "#517657"
+
+GRAY_75 = "#404040"
+
+red = RED
+yellow = YELLOW
+green = GREEN
+blue = BLUE
+white = WHITE
+black = BLACK
+
+tan = TAN
+outline_tan = OUTLINE_TAN
+axis_color = AXIS_COLOR
+dot_color = DOT_COLOR
+sep_pie_color = SEP_PIE_COLOR
+camo_green = CAMO_GREEN
+light_green = LIGHT_GREEN
+dark_green = DARK_GREEN
+lavender = LAVENDER
+mustard = MUSTARD
+salmon = SALMON
+girl_pink = GIRL_PINK
+boy_teal = BOY_TEAL
+girl_orange = GIRL_ORANGE
+dark_purple = DARK_PURPLE
+blue_green = BLUE_GREEN
+county_blue = COUNTY_BLUE
+city_orange = CITY_ORANGE
+white_green = WHITE_GREEN
+black_orange = BLACK_ORANGE
+american_yellow = AMERICAN_YELLOW
+asian_brown = ASIAN_BROWN
+hawaiian_pink = HAWAIIAN_PINK
+other_green = OTHER_GREEN
+multiple_purple = MULTIPLE_PURPLE
+unserved_green = UNSERVED_GREEN
+served_purple = SERVED_PURPLE
+not_eligible_purple = NOT_ELIGIBLE_PURPLE
+eligible_maroon = ELIGIBLE_MAROON
+fifty_nine_dark_green = FIFTY_NINE_DARK_GREEN
+eighty_five_brown = EIGHTY_FIVE_BROWN
+eighty_four_tan = EIGHTY_FOUR_TAN
+twenty_green = TWENTY_GREEN
+seventeen_green = SEVENTEEN_GREEN
+count_light_green = COUNT_LIGHT_GREEN
+count_dark_green = COUNT_DARK_GREEN
+
+gray_75 = GRAY_75
