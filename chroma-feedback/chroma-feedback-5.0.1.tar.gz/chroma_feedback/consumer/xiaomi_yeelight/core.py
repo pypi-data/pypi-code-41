@@ -1,0 +1,52 @@
+import socket
+from chroma_feedback import helper, wording
+from .light import get_lights, process_lights
+
+ARGS = None
+
+
+def init(program):
+	global ARGS
+
+	if not ARGS:
+		ip = None
+
+		if not helper.has_argument('--xiaomi-yeelight-ip'):
+			ip = discover_ips()
+		if ip:
+			program.add_argument('--xiaomi-yeelight-ip', default = ip)
+		else:
+			program.add_argument('--xiaomi-yeelight-ip', action = 'append', required = True)
+	ARGS = program.parse_known_args()[0]
+
+
+def run(status):
+	lights = get_lights(ARGS.xiaomi_yeelight_ip)
+
+	if not lights:
+		exit(wording.get('light_no') + wording.get('exclamation_mark'))
+	return process_lights(status, lights)
+
+
+def discover_ips():
+	message =\
+	[
+		'M-SEARCH * HTTP/1.1',
+		'HOST: 239.255.255.250:1982',
+		'MAN: "ssdp:discover"',
+		'ST: wifi_bulb'
+	]
+	discovery = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+	discovery.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
+	discovery.settimeout(1)
+	discovery.sendto('\r\n'.join(message).encode(), ('239.255.255.250', 1982))
+	ips = []
+
+	while True:
+		try:
+			ip = discovery.recvfrom(65507)[1][0]
+			if ip not in ips:
+				ips.append(ip)
+		except socket.timeout:
+			break
+	return ips
