@@ -1,0 +1,1 @@
+from .contract_rest import register_rest_api

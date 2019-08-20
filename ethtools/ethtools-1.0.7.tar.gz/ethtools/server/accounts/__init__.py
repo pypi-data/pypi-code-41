@@ -1,0 +1,1 @@
+from .account_rest import register_rest_api
