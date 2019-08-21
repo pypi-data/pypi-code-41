@@ -1,0 +1,1 @@
+name = "hanime_image_scraper"
