@@ -1,0 +1,1 @@
+from NumberSequences.NumberSequences.py import TriangularNumbers
