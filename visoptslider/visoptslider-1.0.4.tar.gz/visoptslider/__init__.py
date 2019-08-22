@@ -1,0 +1,1 @@
+from .visoptslider import SlidersWidget
