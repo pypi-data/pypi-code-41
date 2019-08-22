@@ -1,0 +1,3 @@
+from .gatkgermline_variants import GatkGermlineVariantCaller
+from .illuminagermline_strelka import IlluminaGermlineVariantCaller
+from .vardictgermline_variants import VardictGermlineVariantCaller
