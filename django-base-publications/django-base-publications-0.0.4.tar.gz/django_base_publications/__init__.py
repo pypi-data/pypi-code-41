@@ -1,0 +1,3 @@
+__version__ = '0.0.4'
+
+default_app_config = 'django_base_publications.apps.DjangoBasePublicationConfig'
