@@ -1,0 +1,1 @@
+from NumberSequences.NumberSequences import TriangularNumbers
