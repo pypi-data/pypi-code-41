@@ -1,0 +1,282 @@
+# Copyright 2019 IBM Corporation 
+# 
+# Licensed under the Apache License, Version 2.0 (the "License"); 
+# you may not use this file except in compliance with the License. 
+# You may obtain a copy of the License at 
+# 
+#     http://www.apache.org/licenses/LICENSE-2.0 
+# 
+# Unless required by applicable law or agreed to in writing, software 
+# distributed under the License is distributed on an "AS IS" BASIS, 
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. 
+# See the License for the specific language governing permissions and 
+# limitations under the License. 
+from __future__ import print_function
+import logging
+import sys
+import platform
+import subprocess
+import time
+from git import Repo
+import tempfile
+import os
+import tarfile
+import shutil
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+
+def run(cmd):
+    ret = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    logger.info("Command: %s, Returncode: %s" % (ret.args, ret.returncode))
+    return(ret)
+
+def check_call(func, args):
+    ret = func(args)
+    if ret.returncode != 0:
+        logger.info("Error: %s" % ret.stderr.decode())
+        sys.exit(ret.returncode)
+
+def wait_for(operator, namespace):
+    # exit after 600 seconds
+    # pylint: disable=unused-variable
+    for x in range(40):
+        if run("kubectl rollout status deployment/%s-operator -n %s" % (operator, namespace)).returncode != 0:
+            time.sleep(15)
+        else:
+            break
+        
+def register(path, operator, logpath, version):
+    logger.addHandler(logging.FileHandler(os.path.join(path, "openaihub-%s.log" % operator.lower())))
+
+    # clone the py-oah repo
+    openaihub_git_url = "https://github.com/adrian555/py-oah.git"
+    tempdir = tempfile.mkdtemp()
+    basedir = os.path.join(tempdir, os.path.basename(openaihub_git_url))
+    Repo.clone_from(openaihub_git_url, basedir)
+
+    steps = 8
+
+    # unpack operator tgz files to src/registry/operators
+    step = 1
+    logger.info("### %s/%s ### Unpack operator tgz..." % (step, steps))
+    kaniko_path = os.path.join(basedir, "src/registry/kaniko")
+    operator_path = os.path.join(kaniko_path, "operators", operator)
+    os.makedirs(operator_path, exist_ok=True)
+    tf = tarfile.open(os.path.join(path, operator + ".tgz"), "r:gz")
+    tf.extractall(operator_path)
+
+    # create context.tgz
+    step += 1
+    logger.info("### %s/%s ### Create build-context..." % (step, steps))
+    kaniko_tgz = os.path.join(basedir, "kaniko.tgz")
+    tf = tarfile.open(kaniko_tgz, "w:gz")
+    tf.add(os.path.join(kaniko_path, "Dockerfile"), arcname="Dockerfile")
+    tf.add(os.path.join(kaniko_path, "operators"), arcname="operators")
+    tf.close()
+
+    # create docker-config ConfigMap
+    step += 1
+    logger.info("### %s/%s ### Create docker config..." % (step, steps))
+    if run("kubectl get configmap docker-config").returncode != 0:
+        check_call(run, "kubectl create configmap docker-config --from-file=%s/config.json" % kaniko_path)
+
+    # modify kaniko.yaml with operator destination
+    step += 1
+    kaniko_pod = "kaniko-" + operator.lower()
+    logger.info("### %s/%s ### Create kaniko pod..." % (step, steps))
+    run("sed -i %s 's/IMAGETAG/docker.io\/ffdlops\/%s-catalog:v0.0.1/' %s/kaniko.yaml" % ("''" if platform.system() == 'Darwin' else '', operator.lower(), kaniko_path))
+    run("sed -i %s 's/OPERATOR/%s/' %s/kaniko.yaml" % ("''" if platform.system() == 'Darwin' else '', operator.lower(), kaniko_path))
+
+    # create kaniko pod
+    check_call(run, "kubectl apply -f %s/kaniko.yaml" % kaniko_path)
+
+    # wait for the pod to be ready
+    time.sleep(60)
+
+    # copy build context to kaniko container
+    step += 1
+    logger.info("### %s/%s ### Set up kaniko job..." % (step, steps))
+    run("kubectl cp %s %s:/tmp/context.tar.gz -c kaniko-init" % (kaniko_tgz, kaniko_pod))
+    run("kubectl exec %s -c kaniko-init -- tar -zxf /tmp/context.tar.gz -C /kaniko/build-context" % kaniko_pod)
+    run("kubectl exec %s -c kaniko-init -- touch /tmp/complete" % kaniko_pod)
+
+    # now wait for the image to be built and ready
+    step += 1
+    logger.info("### %s/%s ### Wait for the image to be ready..." % (step, steps))
+    # pylint: disable=unused-variable
+    for x in range(40):
+        if run("kubectl get pod/%s|grep %s|awk '{ print $3;exit}'" % (kaniko_pod, kaniko_pod)).stdout.decode() != "Completed\n" :
+            time.sleep(15)
+        else:
+            break
+
+    # delete the kaniko pod
+    step += 1
+    logger.info("### %s/%s ### Delete the kaniko pod..." % (step, steps))
+    run("kubectl delete -f %s/kaniko.yaml" % kaniko_path)
+
+    # generate catalog source yaml
+    step += 1
+    logger.info("### %s/%s ### Deploy the catalog..." % (step, steps))
+    run("sed -i %s 's/REPLACE_OPERATOR/%s/' %s/catalogsource.yaml" % ("''" if platform.system() == 'Darwin' else '', operator, kaniko_path))
+    run("sed -i %s 's/REPLACE_IMAGE/docker.io\/ffdlops\/%s-catalog:v0.0.1/' %s/catalogsource.yaml" % ("''" if platform.system() == 'Darwin' else '', operator.lower(), kaniko_path))
+
+    # deploy the catalog
+    check_call(run, "kubectl apply -f %s/catalogsource.yaml" % kaniko_path)
+
+    # remove temp
+    shutil.rmtree(basedir, ignore_errors=True)
+
+    logger.info("Done.")
+
+def install(namespace, storage, version):
+    # clone the py-oah repo
+    openaihub_git_url = "https://github.com/adrian555/py-oah.git"
+    tempdir = tempfile.mkdtemp()
+    basedir = os.path.join(tempdir, os.path.basename(openaihub_git_url))
+    Repo.clone_from(openaihub_git_url, basedir)
+    
+    steps = 14 if storage == "nfs" else 13
+
+    # prereq: helm must be installed already
+    # init helm tiller service account
+    step = 1
+    logger.info("### %s/%s ### Init helm tiller..." % (step, steps))
+    run("kubectl apply -f %s/src/requirement/helm-tiller.yaml" % basedir)
+    run("helm init --service-account tiller --upgrade")
+
+    openaihub_namespace = namespace
+    openaihub_catalog_path = "%s/src/registry/catalog_source" % basedir
+    openaihub_subscription_path = "%s/src/registry/subscription" % basedir
+    openaihub_cr_path = "%s/src/registry/cr_samples" % basedir
+
+    # install OLM
+    step += 1
+    logger.info("### %s/%s ### Install OLM if not installed..." % (step, steps))
+    olm_operator_status = run("kubectl rollout status deployment/olm-operator -n olm").returncode
+    catalog_operator_status = run("kubectl rollout status deployment/catalog-operator -n olm").returncode
+    if olm_operator_status != 0 or catalog_operator_status != 0:
+        olm_version = "0.10.0"
+        import wget
+        wget.download("https://github.com/operator-framework/operator-lifecycle-manager/releases/download/%s/install.sh" % olm_version, out="%s/install.sh" % basedir)
+        run("bash %s/install.sh %s" % (basedir, olm_version))
+        wait_for("olm", "olm")
+        wait_for("catalog", "olm")
+
+        # TODO: investigate the memory increase problem in OLM and provide proper fix, for now, limit the memory
+        olm_patch = """
+        spec:
+            template:
+                spec:
+                    containers:
+                        - name: olm-operator
+                          resources:
+                            limits:
+                                memory: "2000Mi"
+        """
+        check_call(run, "kubectl patch deployment olm-operator --patch \"%s\" -n olm" % olm_patch)
+        catalog_patch = """
+        spec:
+            template:
+                spec:
+                    containers:
+                        - name: catalog-operator
+                          resources:
+                            limits:
+                                memory: "2000Mi"
+        """
+        check_call(run, "kubectl patch deployment catalog-operator --patch \"%s\" -n olm" % catalog_patch)
+    else:
+        logger.info("OLM already exists.")
+
+    # add openaihub catalog
+    step += 1
+    logger.info("### %s/%s ### Add OpenAIHub operators catalog..." % (step, steps))
+    check_call(run, "kubectl apply -f %s/openaihub.catalogsource.yaml" % openaihub_catalog_path)
+    # pylint: disable=unused-variable
+    for x in range(40):
+        if run("kubectl get packagemanifest|grep OpenAIHub|wc -l").stdout.decode().lstrip().rstrip() != "6":
+            time.sleep(15)
+        else:
+            break
+
+    # create namespace
+    step += 1
+    logger.info("### %s/%s ### Create namespace and add cluster admin..." % (step, steps))
+    if run("kubectl get namespace %s" % openaihub_namespace).returncode != 0:
+        check_call(run, "kubectl create namespace %s" % openaihub_namespace)
+
+    # add cluster-admin to default service account for registration and installation of other operators
+    if run("kubectl get clusterrolebinding add-on-cluster-admin-openaihub").returncode != 0:
+        check_call(run, "kubectl create clusterrolebinding add-on-cluster-admin-openaihub --clusterrole=cluster-admin --serviceaccount=%s:default" % openaihub_namespace)
+
+    # create ConfigMap to set the kubectl client version for operators
+    if run("kubectl get configmap openaihub-install-config -n operators").returncode != 0:
+        kube_version = run("kubectl version --short|grep Server|awk '{ print $3;exit}'|cut -d'+' -f1").stdout.decode().rstrip()
+        check_call(run, "kubectl create configmap openaihub-install-config --from-literal=KUBECTL_VERSION=%s -n operators" % kube_version)
+
+    # create jupyterlab operator
+    step += 1
+    logger.info("### %s/%s ### Deploy Jupyterlab operator..." % (step, steps))
+    check_call(run, "kubectl apply -f %s/%s-operator.yaml" % (openaihub_subscription_path, "jupyterlab"))
+
+    # wait until jupyterlab operator is available
+    step += 1
+    logger.info("### %s/%s ### Wait until Jupyterlab operator is available..." % (step, steps))
+    wait_for("jupyterlab", "operators")
+
+    # create jupyterlab cr
+    step += 1
+    logger.info("### %s/%s ### Create Jupyterlab deployment..." % (step, steps))
+    check_call(run, "kubectl apply -f %s/openaihub_v1alpha1_%s_cr.yaml -n %s" % (openaihub_cr_path, "jupyterlab", openaihub_namespace))
+
+    # switch default storageclass to nfs-dynamic
+    if storage == "nfs":
+        step += 1
+        logger.info("### %s/%s ### Wait for nfs-dynamic storageclass to be ready and set as default..." % (step, steps))
+        # pylint: disable=unused-variable
+        for x in range(40):
+            if run("kubectl get storageclass |grep nfs-dynamic").stdout.decode() == '':
+                time.sleep(15)
+            else:
+                break
+        run("kubectl patch storageclass ibmc-file-bronze -p '{\"metadata\": {\"annotations\":{\"storageclass.kubernetes.io/is-default-class\":\"false\"}}}'")
+        check_call(run, "kubectl patch storageclass nfs-dynamic -p '{\"metadata\": {\"annotations\":{\"storageclass.kubernetes.io/is-default-class\":\"true\"}}}'")
+
+    # create pipelines operator
+    step += 1
+    logger.info("### %s/%s ### Deploy Pipelines operator..." % (step, steps))
+    check_call(run, "kubectl apply -f %s/%s-operator.yaml" % (openaihub_subscription_path, "pipelines"))
+
+    # wait until pipelines operator is available
+    step += 1
+    logger.info("### %s/%s ### Wait until Pipelines operator is available..." % (step, steps))
+    wait_for("pipelines", "operators")
+
+    # create pipelines cr
+    step += 1
+    logger.info("### %s/%s ### Create Pipelines deployment..." % (step, steps))
+    check_call(run, "kubectl apply -f %s/openaihub_v1alpha1_%s_cr.yaml -n %s" % (openaihub_cr_path, "pipelines", openaihub_namespace))
+
+    # create openaihub operator
+    step += 1
+    logger.info("### %s/%s ### Deploy OpenAIHub operator..." % (step, steps))
+    check_call(run, "kubectl apply -f %s/%s-operator.yaml" % (openaihub_subscription_path, "openaihub"))
+
+    # wait until openaihub operator is available
+    step += 1
+    logger.info("### %s/%s ### Wait until OpenAIHub operator is available..." % (step, steps))
+    wait_for("openaihub", "operators")
+
+    # create openaihub cr
+    step += 1
+    logger.info("### %s/%s ### Create OpenAIHub deployment..." % (step, steps))
+    check_call(run, "kubectl apply -f %s/openaihub_v1alpha1_%s_cr.yaml -n %s" % (openaihub_cr_path, "openaihub", openaihub_namespace))
+
+    # remove temp
+    shutil.rmtree(basedir, ignore_errors=True)
+
+    logger.info("Done.")
+
+__all__ = ["install", "register"]
