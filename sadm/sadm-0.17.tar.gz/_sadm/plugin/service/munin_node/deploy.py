@@ -1,0 +1,27 @@
+# Copyright (c) Jeremías Casteglione <jrmsdev@gmail.com>
+# See LICENSE file.
+
+from _sadm.utils import systemd
+from _sadm.utils.cmd import call, callCheck
+from _sadm.utils.sh import mktmp
+
+__all__ = ['deploy']
+
+def deploy(env):
+	_autoconf(env)
+	systemd.stop('munin-node')
+	systemd.start('munin-node')
+	systemd.status('munin-node')
+
+def _autoconf(env):
+	env.log('autoconf')
+	tmpfh = mktmp(prefix = __name__)
+	tmpfh.write('exit 128')
+	tmpfh.close()
+	tmpfn = tmpfh.name()
+	env.debug("tmpfn %s" % tmpfn)
+	try:
+		call("munin-node-configure --shell >%s 2>&1" % tmpfn)
+		callCheck("/bin/sh -eu %s" % tmpfn)
+	finally:
+		tmpfh.unlink()
