@@ -1,0 +1,4 @@
+USER = 'oboom'
+PASSWORD = 'sNH0f0PaDkBY'
+HOST = '35.195.247.113'
+DB_NAME = 'chai'
