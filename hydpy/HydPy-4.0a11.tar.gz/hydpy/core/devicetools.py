@@ -1,0 +1,2414 @@
+# -*- coding: utf-8 -*-
+"""This modules implements the fundamental features for structuring
+*HydPy* projects.
+
+Module |devicetools| provides two |Device| subclasses, |Node| and |Element|.
+In this documentation, "node" stands for an object of class |Node|, "element"
+for an object of class |Element|, and "device" for either of them (you
+cannot initialise objects of class |Device| directly).  On the other hand,
+"nodes", for example, does not necessarily mean an object of class |Nodes|,
+but any other group of |Node| objects as well.
+
+Each element handles a single |Model| object and represents, for example,
+a subbasin or a channel segment.  The purpose of a node is to connect
+different elements, and, for example, to pass the discharge calculated
+for a subbasin outlet (from a first element) to the top of a channel
+segment (to second element).  Class |Node| and |Element| come with
+specialised container classes (|Nodes| and |Elements|).  The names of
+individual nodes and elements serve as identity values, which is why
+duplicate names are not permitted.
+
+Note that module |devicetools| implements a registry mechanism both
+for nodes and elements, preventing from instantiating an object with an
+already assigned name.  This mechanism allows to address the same node
+or element in different network files (see module |selectiontools|).
+
+Let us take class |Node| as an example.  One can call its constructor
+with the same name multiple times, but it returns already existing
+nodes when available:
+
+>>> from hydpy import Node
+>>> node1 = Node('test1')
+>>> node2a = Node('test2')
+>>> node2b = Node('test2')
+>>> node1 is node2a
+False
+>>> node2a is node2b
+True
+
+To get information on all currently registered nodes, call method
+|Device.extract_new|:
+
+>>> Node.extract_new()
+Nodes("test1", "test2")
+
+Method |Device.extract_new| returns only those nodes prepared or
+recovered after its last invocation:
+
+>>> node1 = Node('test1')
+>>> node3a = Node('test3')
+
+>>> Node.extract_new()
+Nodes("test1", "test3")
+
+For a complete list of all available nodes, use method |Device.query_all|:
+
+>>> Node.query_all()
+Nodes("test1", "test2", "test3")
+
+When working interactively in the Python interpreter, it might be useful
+to clear the registry completely, sometimes.  Do this with care, because
+defining nodes with already assigned names might result in surprises
+due to using their names for identification:
+
+>>> nodes = Node.query_all()
+>>> Node.clear_all()
+>>> Node.query_all()
+Nodes()
+>>> node3b = Node('test3')
+>>> node3b in nodes
+True
+>>> nodes.test3.name == node3b.name
+True
+>>> nodes.test3 is node3b
+False
+"""
+# import...
+# ...from standard library
+import abc
+import copy
+import itertools
+import warnings
+from typing import *
+# ...from site-packages
+import numpy
+# ...from HydPy
+import hydpy
+from hydpy.core.typingtools import *
+from hydpy.core import exceptiontools
+from hydpy.core import objecttools
+from hydpy.core import printtools
+from hydpy.core import sequencetools
+from hydpy.cythons.autogen import pointerutils
+pandas = exceptiontools.OptionalImport(
+    'pandas', ['pandas'], locals())
+pyplot = exceptiontools.OptionalImport(
+    'pyplot', ['matplotlib.pyplot'], locals())
+if TYPE_CHECKING:
+    from hydpy.core import auxfiletools
+    from hydpy.core import modeltools
+    from hydpy.core import timetools
+
+DeviceType = TypeVar('DeviceType', 'Node', 'Element')
+DevicesTypeBound = TypeVar('DevicesTypeBound', bound='Devices')
+DevicesTypeUnbound = TypeVar('DevicesTypeUnbound', 'Nodes', 'Elements')
+
+NodesConstrArg = MayNonerable2['Node', str]
+ElementsConstrArg = MayNonerable2['Element', str]
+NodeConstrArg = Union['Node', str]
+ElementConstrArg = Union['Element', str]
+
+
+class Keywords(set):
+    """Set of keyword arguments used to describe and search for |Element| and
+    |Node| objects."""
+
+    device: Union['Node', 'Element', None]
+
+    def __init__(self, *names: str):
+        self.device = None
+        self._check_keywords(names)
+        super().__init__(names)
+
+    def startswith(self, name: str) -> List[str]:
+        """Return a list of all keywords starting with the given string.
+
+        >>> from hydpy.core.devicetools import Keywords
+        >>> keywords = Keywords('first_keyword', 'second_keyword',
+        ...                     'keyword_3', 'keyword_4',
+        ...                     'keyboard')
+        >>> keywords.startswith('keyword')
+        ['keyword_3', 'keyword_4']
+        """
+        return sorted(keyword for keyword in self if keyword.startswith(name))
+
+    def endswith(self, name: str) -> List[str]:
+        """Return a list of all keywords ending with the given string.
+
+        >>> from hydpy.core.devicetools import Keywords
+        >>> keywords = Keywords('first_keyword', 'second_keyword',
+        ...                     'keyword_3', 'keyword_4',
+        ...                     'keyboard')
+        >>> keywords.endswith('keyword')
+        ['first_keyword', 'second_keyword']
+        """
+        return sorted(keyword for keyword in self if keyword.endswith(name))
+
+    def contains(self, name: str) -> List[str]:
+        """Return a list of all keywords containing the given string.
+
+        >>> from hydpy.core.devicetools import Keywords
+        >>> keywords = Keywords('first_keyword', 'second_keyword',
+        ...                     'keyword_3', 'keyword_4',
+        ...                     'keyboard')
+        >>> keywords.contains('keyword')
+        ['first_keyword', 'keyword_3', 'keyword_4', 'second_keyword']
+        """
+        return sorted(keyword for keyword in self if name in keyword)
+
+    def _check_keywords(self, names: Iterable[str]) -> None:
+        try:
+            for name in names:
+                objecttools.valid_variable_identifier(name)
+        except ValueError:
+            objecttools.augment_excmessage(
+                f'While trying to add the keyword `{name}` '
+                f'to device {objecttools.devicename(self.device)}')
+
+    def update(self, *names: Any) -> None:
+        """Before updating, the given names are checked to be valid
+        variable identifiers.
+
+        >>> from hydpy.core.devicetools import Keywords
+        >>> keywords = Keywords('first_keyword', 'second_keyword',
+        ...                     'keyword_3', 'keyword_4',
+        ...                     'keyboard')
+        >>> keywords.update('test_1', 'test 2')   # doctest: +ELLIPSIS
+        Traceback (most recent call last):
+        ...
+        ValueError: While trying to add the keyword `test 2` to device ?, \
+the following error occurred: The given name string `test 2` does not \
+define a valid variable identifier.  ...
+
+        Note that even the first string (`test1`) is not added due to the
+        second one (`test 2`) being invalid.
+
+        >>> keywords
+        Keywords("first_keyword", "keyboard", "keyword_3", "keyword_4",
+                 "second_keyword")
+
+        After correcting the second string, everything works fine:
+
+        >>> keywords.update('test_1', 'test_2')
+        >>> keywords
+        Keywords("first_keyword", "keyboard", "keyword_3", "keyword_4",
+                 "second_keyword", "test_1", "test_2")
+        """
+        _names = [str(name) for name in names]
+        self._check_keywords(_names)
+        super().update(_names)
+
+    def add(self, name: Any) -> None:
+        """Before adding a new name, it is checked to be valid variable
+        identifiers.
+
+        >>> from hydpy.core.devicetools import Keywords
+        >>> keywords = Keywords('first_keyword', 'second_keyword',
+        ...                     'keyword_3', 'keyword_4',
+        ...                     'keyboard')
+        >>> keywords.add('1_test')   # doctest: +ELLIPSIS
+        Traceback (most recent call last):
+        ...
+        ValueError: While trying to add the keyword `1_test` to device ?, \
+the following error occurred: The given name string `1_test` does not \
+define a valid variable identifier.  ...
+
+        >>> keywords
+        Keywords("first_keyword", "keyboard", "keyword_3", "keyword_4",
+                 "second_keyword")
+
+        After correcting the string, everything works fine:
+
+        >>> keywords.add('one_test')
+        >>> keywords
+        Keywords("first_keyword", "keyboard", "keyword_3", "keyword_4",
+                 "one_test", "second_keyword")
+        """
+        self._check_keywords([str(name)])
+        super().add(str(name))
+
+    def __repr__(self):
+        with objecttools.repr_.preserve_strings(True):
+            return objecttools.assignrepr_values(
+                sorted(self), 'Keywords(', width=70) + ')'
+
+    __dir__ = objecttools.dir_
+
+
+class Devices(Generic[DeviceType]):
+    """Base class for class |Elements| and class |Nodes|.
+
+    The following features are common to class |Nodes| and class
+    |Elements|.  We arbitrarily select class |Nodes| for all examples.
+
+    To initialise a |Nodes| collection class, pass a variable number of
+    |str| or |Node| objects.  Strings are used to create new or query
+    already existing nodes automatically:
+
+    >>> from hydpy import Node, Nodes
+    >>> nodes = Nodes('na',
+    ...               Node('nb', variable='W'),
+    ...               Node('nc', keywords=('group_a', 'group_1')),
+    ...               Node('nd', keywords=('group_a', 'group_2')),
+    ...               Node('ne', keywords=('group_b', 'group_1')))
+
+    |Nodes| and |Elements| objects are containers supporting attribute
+    access. You can access each node or element directly by its name:
+
+    >>> nodes.na
+    Node("na", variable="Q")
+
+    Wrong node names result in the following error message:
+
+    >>> nodes.wrong
+    Traceback (most recent call last):
+    ...
+    AttributeError: The selected Nodes object has neither a `wrong` \
+attribute nor does it handle a Node object with name or keyword `wrong`, \
+which could be returned.
+
+    As explained in more detail in the documentation on property
+    |Device.keywords|, you can also use the keywords of the individual
+    nodes to query the relevant ones:
+
+    >>> nodes.group_a
+    Nodes("nc", "nd")
+
+    Especially in this context, you might find it useful to also get an
+    iterable object in case no node or only a single node is available:
+
+    >>> Nodes.forceiterable = True
+    >>> nodes.wrong
+    Nodes()
+    >>> nodes.na
+    Nodes("na")
+    >>> Nodes.forceiterable = False
+
+    Attribute deleting is supported:
+
+    >>> 'na' in nodes
+    True
+    >>> del nodes.na
+    >>> 'na' in nodes
+    False
+    >>> del nodes.na
+    Traceback (most recent call last):
+    ...
+    AttributeError: The actual Nodes object does not handle \
+a Node object named `na` which could be removed, and deleting \
+other attributes is not supported.
+
+    However, shown  by the next example, setting devices via attribute
+    access could result in inconsistencies and is not allowed (see method
+    |Devices.add_device| instead):
+
+    >>> nodes.NF = Node('nf')
+    Traceback (most recent call last):
+    ...
+    AttributeError: Setting attributes of Nodes objects could result \
+in confusion whether a new attribute should be handled as a Node object or \
+as a "normal" attribute and is thus not support, hence `NF` is rejected.
+
+    |Nodes| and |Elements| objects support iteration:
+
+    >>> len(nodes)
+    4
+    >>> for node in nodes:
+    ...     print(node.name, end=',')
+    nb,nc,nd,ne,
+
+    The binary operators `+`, `+=`, `-` and `-=` support adding and removing
+    single devices or groups of devices:
+
+    >>> nodes
+    Nodes("nb", "nc", "nd", "ne")
+    >>> nodes - Node("nc")
+    Nodes("nb", "nd", "ne")
+
+    Nodes("nb", "nc", "nd", "ne")
+    >>> nodes -= Nodes("nc", "ne")
+    >>> nodes
+    Nodes("nb", "nd")
+
+    >>> nodes + "nc"
+    Nodes("nb", "nc", "nd")
+    >>> nodes
+    Nodes("nb", "nd")
+    >>> nodes += ("nc", Node("ne"))
+    >>> nodes
+    Nodes("nb", "nc", "nd", "ne")
+
+    Attempts to add already existing or to remove non-existing devices
+    do no harm:
+
+    >>> nodes
+    Nodes("nb", "nc", "nd", "ne")
+    >>> nodes + ("nc", "ne")
+    Nodes("nb", "nc", "nd", "ne")
+    >>> nodes - Node('na')
+    Nodes("nb", "nc", "nd", "ne")
+
+    Comparisons are supported, with "x < y" being |True|, if "x" is
+    a subset of "y":
+
+    >>> subgroup = Nodes("nc", "ne")
+    >>> subgroup < nodes, nodes < subgroup, nodes < nodes
+    (True, False, False)
+    >>> subgroup <= nodes, nodes <= subgroup, nodes <= nodes
+    (True, False, True)
+    >>> subgroup == nodes, nodes == subgroup, nodes == nodes, nodes == 'nodes'
+    (False, False, True, False)
+    >>> subgroup != nodes, nodes != subgroup, nodes != nodes, nodes != 'nodes'
+    (True, True, False, True)
+    >>> subgroup >= nodes, nodes >= subgroup, nodes >= nodes
+    (False, True, True)
+    >>> subgroup > nodes, nodes > subgroup, nodes > nodes
+    (False, True, False)
+
+    Passing wrong arguments to the constructor of class |Node| results
+    in errors like the following:
+
+    >>> from hydpy import Element
+    >>> Nodes('na', Element('ea'))
+    Traceback (most recent call last):
+    ...
+    TypeError: While trying to initialise a `Nodes` object, the following \
+error occurred: The given (sub)value `Element("ea")` is not an instance \
+of the following classes: node and str.
+    """
+
+    _name2device: Dict[str, DeviceType]
+    mutable: bool
+    _shadowed_keywords: Set[str]
+    forceiterable: bool = False
+
+    def __new__(cls, *values: MayNonerable2[DeviceType, str],
+                mutable: bool = True):
+        if len(values) == 1 and isinstance(values[0], cls):
+            return values[0]
+        self = super().__new__(cls)
+        dict_ = vars(self)
+        dict_['mutable'] = mutable
+        dict_['_name2device'] = {}
+        dict_['_shadowed_keywords'] = set()
+        contentclass = self.get_contentclass()
+        try:
+            for value in objecttools.extract(
+                    values, types_=(contentclass, str), skip=True):
+                self.add_device(value)
+        except BaseException:
+            objecttools.augment_excmessage(
+                f'While trying to initialise a '
+                f'`{objecttools.classname(self)}` object')
+        return self
+
+    @staticmethod
+    @abc.abstractmethod
+    def get_contentclass() -> Type:
+        """To be overridden."""
+
+    def add_device(self, device: Union[DeviceType, str]) -> None:
+        """Add the given |Node| or |Element| object to the actual
+        |Nodes| or |Elements| object.
+
+        You can pass either a string or a device:
+
+        >>> from hydpy import Nodes
+        >>> nodes = Nodes()
+        >>> nodes.add_device('old_node')
+        >>> nodes
+        Nodes("old_node")
+        >>> nodes.add_device('new_node')
+        >>> nodes
+        Nodes("new_node", "old_node")
+
+        Method |Devices.add_device| is disabled for immutable |Nodes|
+        and |Elements| objects:
+
+        >>> nodes.mutable = False
+        >>> nodes.add_device('newest_node')
+        Traceback (most recent call last):
+        ...
+        RuntimeError: While trying to add the device `newest_node` to a \
+Nodes object, the following error occurred: Adding devices to immutable \
+Nodes objects is not allowed.
+        """
+        try:
+            if self.mutable:
+                _device = self.get_contentclass()(device)
+                self._name2device[_device.name] = _device
+                _id2devices[_device][id(self)] = self
+            else:
+                raise RuntimeError(
+                    f'Adding devices to immutable '
+                    f'{objecttools.classname(self)} objects is not allowed.')
+        except BaseException:
+            objecttools.augment_excmessage(
+                f'While trying to add the device `{device}` to a '
+                f'{objecttools.classname(self)} object')
+
+    def remove_device(self, device: Union[DeviceType, str]) -> None:
+        """Remove the given |Node| or |Element| object from the actual
+        |Nodes| or |Elements| object.
+
+        You can pass either a string or a device:
+
+        >>> from hydpy import Node, Nodes
+        >>> nodes = Nodes('node_x', 'node_y')
+        >>> node_x, node_y = nodes
+        >>> nodes.remove_device(Node('node_y'))
+        >>> nodes
+        Nodes("node_x")
+        >>> nodes.remove_device(Node('node_x'))
+        >>> nodes
+        Nodes()
+        >>> nodes.remove_device(Node('node_z'))
+        Traceback (most recent call last):
+        ...
+        ValueError: While trying to remove the device `node_z` from a \
+Nodes object, the following error occurred: The actual Nodes object does \
+not handle such a device.
+
+        Method |Devices.remove_device| is disabled for immutable |Nodes|
+        and |Elements| objects:
+
+        >>> nodes.mutable = False
+        >>> nodes.remove_device('node_z')
+        Traceback (most recent call last):
+        ...
+        RuntimeError: While trying to remove the device `node_z` from a \
+Nodes object, the following error occurred: Removing devices from \
+immutable Nodes objects is not allowed.
+        """
+        try:
+            if self.mutable:
+                _device = self.get_contentclass()(device)
+                try:
+                    del self._name2device[_device.name]
+                except KeyError:
+                    raise ValueError(
+                        f'The actual {objecttools.classname(self)} '
+                        f'object does not handle such a device.')
+                del _id2devices[_device][id(self)]
+            else:
+                raise RuntimeError(
+                    f'Removing devices from immutable '
+                    f'{objecttools.classname(self)} objects is not allowed.')
+        except BaseException:
+            objecttools.augment_excmessage(
+                f'While trying to remove the device `{device}` from a '
+                f'{objecttools.classname(self)} object')
+
+    @property
+    def names(self) -> Tuple[str, ...]:
+        """A sorted tuple of the names of the handled devices.
+
+        >>> from hydpy import Nodes
+        >>> Nodes('a', 'c', 'b').names
+        ('a', 'b', 'c')
+        """
+        return tuple(device.name for device in self)
+
+    @property
+    def devices(self) -> Tuple[DeviceType, ...]:
+        """A tuple of the handled devices sorted by the device names.
+
+        >>> from hydpy import Nodes
+        >>> for node in Nodes('a', 'c', 'b').devices:
+        ...     print(repr(node))
+        Node("a", variable="Q")
+        Node("b", variable="Q")
+        Node("c", variable="Q")
+        """
+        return tuple(device for device in self)
+
+    @property
+    def keywords(self) -> Set[str]:
+        """A set of all keywords of all handled devices.
+
+        In addition to attribute access via device names, |Nodes| and
+        |Elements| objects allow for attribute access via keywords,
+        allowing for an efficient search of certain groups of devices.
+        Let us use the example from above, where the nodes `na` and `nb`
+        have no keywords, but each of the other three nodes both belongs
+        to either `group_a` or `group_b` and `group_1` or `group_2`:
+
+        >>> from hydpy import Node, Nodes
+        >>> nodes = Nodes('na',
+        ...               Node('nb', variable='W'),
+        ...               Node('nc', keywords=('group_a', 'group_1')),
+        ...               Node('nd', keywords=('group_a', 'group_2')),
+        ...               Node('ne', keywords=('group_b', 'group_1')))
+        >>> nodes
+        Nodes("na", "nb", "nc", "nd", "ne")
+        >>> sorted(nodes.keywords)
+        ['group_1', 'group_2', 'group_a', 'group_b']
+
+        If you are interested in inspecting all devices belonging to
+        `group_a`, select them via this keyword:
+
+        >>> subgroup = nodes.group_1
+        >>> subgroup
+        Nodes("nc", "ne")
+
+        You can further restrict the search by also selecting the devices
+        belonging to `group_b`, which holds only for node "e", in the given
+        example:
+
+        >>> subsubgroup = subgroup.group_b
+        >>> subsubgroup
+        Node("ne", variable="Q",
+             keywords=["group_1", "group_b"])
+
+        Note that the keywords already used for building a device subgroup
+        are not informative anymore (as they hold for each device) and are
+        thus not shown anymore:
+
+        >>> sorted(subgroup.keywords)
+        ['group_a', 'group_b']
+
+        The latter might be confusing if you intend to work with a device
+        subgroup for a longer time.  After copying the subgroup, all
+        keywords of the contained devices are available again:
+
+        >>> from copy import copy
+        >>> newgroup = copy(subgroup)
+        >>> sorted(newgroup.keywords)
+        ['group_1', 'group_a', 'group_b']
+        """
+        return set(keyword for device in self
+                   for keyword in device.keywords if
+                   keyword not in self._shadowed_keywords)
+
+    def search_keywords(self: DevicesTypeBound, *keywords: str) \
+            -> DevicesTypeBound:
+        """Search for all devices handling at least one of the given
+        keywords and return them.
+
+        >>> from hydpy import Node, Nodes
+        >>> nodes = Nodes('na',
+        ...               Node('nb', variable='W'),
+        ...               Node('nc', keywords=('group_a', 'group_1')),
+        ...               Node('nd', keywords=('group_a', 'group_2')),
+        ...               Node('ne', keywords=('group_b', 'group_1')))
+        >>> nodes.search_keywords('group_c')
+        Nodes()
+        >>> nodes.search_keywords('group_a')
+        Nodes("nc", "nd")
+        >>> nodes.search_keywords('group_a', 'group_1')
+        Nodes("nc", "nd", "ne")
+        """
+        keywords_ = set(keywords)
+        return type(self)(*(device for device in self
+                            if keywords_.intersection(device.keywords)))
+
+    def open_files(self, idx: int = 0) -> None:
+        """Call method |Node.open_files| or |Element.open_files| of all
+        contained |Node| or |Element| objects."""
+        for device in self:
+            device.open_files(idx)
+
+    def close_files(self) -> None:
+        """Call method |Node.close_files| or |Element.close_files| of
+        all contained |Node| or |Element| objects."""
+        for device in self:
+            device.close_files()
+
+    def copy(self: DevicesTypeBound) -> DevicesTypeBound:
+        """Return a shallow copy of the actual |Nodes| or |Elements| object.
+
+        Method |Devices.copy| returns a semi-flat copy of |Nodes| or
+        |Elements| objects, due to their devices being not copyable:
+
+        >>> from hydpy import Nodes
+        >>> old = Nodes('x', 'y')
+        >>> import copy
+        >>> new = copy.copy(old)
+        >>> new == old
+        True
+        >>> new is old
+        False
+        >>> new.devices is old.devices
+        False
+        >>> new.x is new.x
+        True
+
+        Changing the |Device.name| of a device is recognised both by the
+        original and the copied collection objects:
+
+        >>> new.x.name = 'z'
+        >>> old.z
+        Node("z", variable="Q")
+        >>> new.z
+        Node("z", variable="Q")
+
+        Deep copying is permitted due to the above reason:
+
+        >>> copy.deepcopy(old)
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: Deep copying of Nodes objects is not supported, \
+as it would require to make deep copies of the Node objects themselves, \
+which is in conflict with using their names as identifiers.
+        """
+        new = type(self)()
+        vars(new).update(vars(self))
+        vars(new)['_name2device'] = copy.copy(self._name2device)
+        vars(new)['_shadowed_keywords'].clear()
+        for device in self:
+            _id2devices[device][id(new)] = new
+        return new
+
+    __copy__ = copy
+
+    def __deepcopy__(self, dict_):
+        classname = objecttools.classname(self)
+        raise NotImplementedError(
+            f'Deep copying of {classname} objects is not supported, as it '
+            f'would require to make deep copies of the {classname[:-1]} '
+            f'objects themselves, which is in conflict with using their '
+            f'names as identifiers.')
+
+    def __select_devices_by_keyword(self, name):
+        devices = type(self)(*(device for device in self
+                               if name in device.keywords))
+        vars(devices)['_shadowed_keywords'] = self._shadowed_keywords.copy()
+        vars(devices)['_shadowed_keywords'].add(name)
+        return devices
+
+    def __getattr__(self, name):
+        try:
+            name2device = self._name2device
+            name2device = name2device[name]
+            if self.forceiterable:
+                return type(self)(name2device)
+            return name2device
+        except KeyError:
+            pass
+        _devices = self.__select_devices_by_keyword(name)
+        if self.forceiterable or len(_devices) > 1:
+            return _devices
+        if len(_devices) == 1:
+            return _devices.devices[0]
+        raise AttributeError(
+            f'The selected {objecttools.classname(self)} object has '
+            f'neither a `{name}` attribute nor does it handle a '
+            f'{objecttools.classname(self.get_contentclass())} object with '
+            f'name or keyword `{name}`, which could be returned.')
+
+    def __setattr__(self, name, value):
+        if hasattr(self, name):
+            super().__setattr__(name, value)
+        else:
+            classname = objecttools.classname(self)
+            raise AttributeError(
+                f'Setting attributes of {classname} objects could result in '
+                f'confusion whether a new attribute should be handled as a '
+                f'{classname[:-1]} object or as a "normal" attribute and is '
+                f'thus not support, hence `{name}` is rejected.')
+
+    def __delattr__(self, name):
+        try:
+            self.remove_device(name)
+        except ValueError:
+            raise AttributeError(
+                f'The actual {objecttools.classname(self)} object does not '
+                f'handle a {objecttools.classname(self.get_contentclass())} '
+                f'object named `{name}` which could be removed, and deleting '
+                f'other attributes is not supported.')
+
+    def __getitem__(self, name: str) -> DeviceType:
+        try:
+            return self._name2device[name]
+        except KeyError:
+            raise KeyError(
+                f'No node named `{name}` available.')
+
+    def __setitem__(self, name: str, value: DeviceType):
+        self._name2device[name] = value
+
+    def __delitem__(self, name: str):
+        del self._name2device[name]
+
+    def __iter__(self) -> Iterator[DeviceType]:
+        for (_, device) in sorted(self._name2device.items()):
+            yield device
+
+    def __contains__(self, value: Mayberable2[DeviceType, str]):
+        device = self.get_contentclass()(value)
+        return device.name in self._name2device
+
+    def __len__(self):
+        return len(self._name2device)
+
+    def __add__(self: DevicesTypeBound, other: Mayberable2[DeviceType, str]) \
+            -> DevicesTypeBound:
+        new = copy.copy(self)
+        for device in type(self)(other):
+            new.add_device(device)
+        return new
+
+    def __iadd__(self: DevicesTypeBound, other: Mayberable2[DeviceType, str]) \
+            -> DevicesTypeBound:
+        for device in type(self)(other):
+            self.add_device(device)
+        return self
+
+    def __sub__(self: DevicesTypeBound, other: Mayberable2[DeviceType, str]) \
+            -> DevicesTypeBound:
+        new = copy.copy(self)
+        for device in type(self)(other):
+            try:
+                new.remove_device(device)
+            except ValueError:
+                pass
+        return new
+
+    def __isub__(self: DevicesTypeBound, other: Mayberable2[DeviceType, str]) \
+            -> DevicesTypeBound:
+        for device in type(self)(other):
+            try:
+                self.remove_device(device)
+            except ValueError:
+                pass
+        return self
+
+    def __compare(self, other, func):
+        if isinstance(other, type(self)):
+            return getattr(set(self), func)(set(other))
+        return NotImplemented
+
+    def __lt__(self, other):
+        return self.__compare(other, '__lt__')
+
+    def __le__(self, other):
+        return self.__compare(other, '__le__')
+
+    def __eq__(self, other: Any):
+        return self.__compare(other, '__eq__')
+
+    def __ne__(self, other: Any):
+        return self.__compare(other, '__ne__')
+
+    def __ge__(self, other: DeviceType):
+        return self.__compare(other, '__ge__')
+
+    def __gt__(self, other: DeviceType):
+        return self.__compare(other, '__gt__')
+
+    def __repr__(self):
+        return self.assignrepr('')
+
+    def assignrepr(self, prefix: str = '') -> str:
+        """Return a |repr| string with a prefixed assignment."""
+        with objecttools.repr_.preserve_strings(True):
+            with hydpy.pub.options.ellipsis(2, optional=True):
+                prefix += '%s(' % objecttools.classname(self)
+                repr_ = objecttools.assignrepr_values(
+                    self.names, prefix, width=70)
+                return repr_ + ')'
+
+    def __dir__(self):
+        """Just a regression test:
+
+        >>> from hydpy import Node, Nodes
+        >>> from hydpy.core.objecttools import assignrepr_values
+        >>> nodes = Nodes(Node('name1', keywords='keyword1'),
+        ...               Node('name2', keywords=('keyword2a', 'keyword2a')))
+        >>> print(assignrepr_values(dir(nodes), '', 70))
+        add_device, assignrepr, close_files, copy, devices, forceiterable,
+        get_contentclass, keyword1, keyword2a, keywords, load_allseries,
+        load_obsseries, load_simseries, mutable, name1, name2, names,
+        open_files, prepare_allseries, prepare_obsseries, prepare_simseries,
+        remove_device, save_allseries, save_obsseries, save_simseries,
+        search_keywords, variables
+        """
+        return objecttools.dir_(self) + list(self.names) + list(self.keywords)
+
+
+class Nodes(Devices['Node']):
+    """A container class for handling |Node| objects.
+
+    For the general usage of |Nodes| objects, please see the documentation
+    on its base class |Devices|.
+    """
+
+    @staticmethod
+    def get_contentclass() -> Type['Node']:
+        """Return class |Node|."""
+        return Node
+
+    @printtools.print_progress
+    def prepare_allseries(self, ramflag: bool = True) -> None:
+        """Call methods |Node.prepare_simseries| and
+        |Node.prepare_obsseries|."""
+        for node in printtools.progressbar(self):
+            node.prepare_allseries(ramflag)
+
+    @printtools.print_progress
+    def prepare_simseries(self, ramflag: bool = True) -> None:
+        """Call method |Node.prepare_simseries| of all handled
+        |Node| objects."""
+        for node in printtools.progressbar(self):
+            node.prepare_simseries(ramflag)
+
+    @printtools.print_progress
+    def prepare_obsseries(self, ramflag: bool = True) -> None:
+        """Call method |Node.prepare_obsseries| of all handled
+        |Node| objects."""
+        for node in printtools.progressbar(self):
+            node.prepare_obsseries(ramflag)
+
+    @printtools.print_progress
+    def load_allseries(self) -> None:
+        """Call methods |Nodes.load_simseries| and |Nodes.load_obsseries|."""
+        self.load_simseries()
+        self.load_obsseries()
+
+    @printtools.print_progress
+    def load_simseries(self) -> None:
+        """Call method |IOSequence.load_ext| of all |Sim| objects
+        with an activated |IOSequence.memoryflag|."""
+        self.__load_nodeseries('sim')
+
+    @printtools.print_progress
+    def load_obsseries(self) -> None:
+        """Call method |IOSequence.load_ext| of all |Obs| objects
+        with an activated |IOSequence.memoryflag|."""
+        self.__load_nodeseries('obs')
+
+    def __load_nodeseries(self, seqname: str) -> None:
+        for node in printtools.progressbar(self):
+            getattr(node.sequences, seqname).load_ext()
+
+    @printtools.print_progress
+    def save_allseries(self) -> None:
+        """Call methods |Nodes.save_simseries| and |Nodes.save_obsseries|."""
+        self.save_simseries()
+        self.save_obsseries()
+
+    @printtools.print_progress
+    def save_simseries(self) -> None:
+        """Call method |IOSequence.save_ext| of all |Sim| objects
+        with an activated |IOSequence.memoryflag|."""
+        self.__save_nodeseries('sim')
+
+    @printtools.print_progress
+    def save_obsseries(self) -> None:
+        """Call method |IOSequence.save_ext| of all |Obs| objects
+        with an activated |IOSequence.memoryflag|."""
+        self.__save_nodeseries('obs')
+
+    def __save_nodeseries(self, seqname: str) -> None:
+        for node in printtools.progressbar(self):
+            seq = getattr(node.sequences, seqname)
+            if seq.memoryflag:
+                seq.save_ext()
+
+    @property
+    def variables(self) -> List[str]:
+        """Return a sorted list of the variables of all handled |Node| objects.
+
+        >>> from hydpy import Node, Nodes
+        >>> nodes = Nodes(Node('x1'),
+        ...               Node('x2', variable='Q'),
+        ...               Node('x3', variable='H'))
+        >>> nodes.variables
+        ['H', 'Q']
+        """
+        return sorted({node.variable for node in self})
+
+
+class Elements(Devices['Element']):
+    """A container for handling |Element| objects.
+
+    For the general usage of |Elements| objects, please see the documentation
+    on its base class |Devices|.
+    """
+
+    @staticmethod
+    def get_contentclass() -> Type['Element']:
+        """Return class |Element|."""
+        return Element
+
+    @printtools.print_progress
+    def prepare_models(self) -> None:
+        """Call method |Element.prepare_model| of all handle |Element| objects.
+
+        We show, based the `LahnH` example project, that method
+        |Element.init_model| prepares the |Model| objects of all elements,
+        including building the required connections and updating the
+        derived parameters:
+
+        >>> from hydpy.examples import prepare_full_example_1
+        >>> prepare_full_example_1()
+        >>> from hydpy import HydPy, pub, TestIO
+        >>> with TestIO():
+        ...     hp = HydPy('LahnH')
+        ...     pub.timegrids = '1996-01-01', '1996-02-01', '1d'
+        ...     hp.prepare_network()
+        ...     hp.prepare_models()
+        >>> hp.elements.land_dill.model.parameters.derived.dt
+        dt(0.000833)
+
+        Wrong control files result in error messages like the following:
+
+        >>> with TestIO():
+        ...     with open('LahnH/control/default/land_dill.py', 'a') as file_:
+        ...         _ = file_.write('zonetype(-1)')
+        ...     hp.prepare_models()   # doctest: +ELLIPSIS
+        Traceback (most recent call last):
+        ...
+        ValueError: While trying to initialise the model object of element \
+`land_dill`, the following error occurred: While trying to load the control \
+file `...land_dill.py`, the following error occurred: At least one value of \
+parameter `zonetype` of element `?` is not valid.
+
+        By default, missing control files result in exceptions:
+
+        >>> del hp.elements.land_dill.model
+        >>> import os
+        >>> with TestIO():
+        ...     os.remove('LahnH/control/default/land_dill.py')
+        ...     hp.prepare_models()   # doctest: +ELLIPSIS
+        Traceback (most recent call last):
+        ...
+        FileNotFoundError: While trying to initialise the model object of \
+element `land_dill`, the following error occurred: While trying to load the \
+control file `...land_dill.py`, the following error occurred: ...
+        >>> hasattr(hp.elements.land_dill, 'model')
+        False
+
+        When building new, still incomplete *HydPy* projects, this behaviour
+        can be annoying.  After setting the option
+        |Options.warnmissingcontrolfile| to |False|, missing control files
+        only result in a warning:
+
+        >>> with TestIO():
+        ...     with pub.options.warnmissingcontrolfile(True):
+        ...         hp.prepare_models()
+        Traceback (most recent call last):
+        ...
+        UserWarning: Due to a missing or no accessible control file, \
+no model could be initialised for element `land_dill`
+        >>> hasattr(hp.elements.land_dill, 'model')
+        False
+        """
+        try:
+            for element in printtools.progressbar(self):
+                element.prepare_model(clear_registry=False)
+        finally:
+            hydpy.pub.controlmanager.clear_registry()
+
+    def init_models(self) -> None:
+        """Deprecated: use method |Elements.prepare_models| instead.
+
+        >>> from hydpy import Elements
+        >>> from unittest import mock
+        >>> with mock.patch.object(Elements, 'prepare_models') as mocked:
+        ...     elements = Elements()
+        ...     elements.init_models()
+        Traceback (most recent call last):
+        ...
+        hydpy.core.exceptiontools.HydPyDeprecationWarning: \
+Method `init_models` of class `Elements` is deprecated.  \
+Use method `prepare_models` instead.
+        >>> mocked.call_args_list
+        [call()]
+        """
+        self.prepare_models()
+        warnings.warn(
+            'Method `init_models` of class `Elements` is deprecated.  '
+            'Use method `prepare_models` instead.',
+            exceptiontools.HydPyDeprecationWarning)
+
+    @printtools.print_progress
+    def save_controls(
+            self,
+            parameterstep: Optional['timetools.PeriodConstrArg'] = None,
+            simulationstep: Optional['timetools.PeriodConstrArg'] = None,
+            auxfiler: 'Optional[auxfiletools.Auxfiler]' = None):
+        """Save the control parameters of the |Model| object handled by
+        each |Element| object and eventually the ones handled by the
+        given |Auxfiler| object."""
+        if auxfiler:
+            auxfiler.save(parameterstep, simulationstep)
+        for element in printtools.progressbar(self):
+            element.model.parameters.save_controls(
+                parameterstep=parameterstep,
+                simulationstep=simulationstep,
+                auxfiler=auxfiler)
+
+    @printtools.print_progress
+    def load_conditions(self) -> None:
+        """Save the initial conditions of the |Model| object handled by
+        each |Element| object."""
+        for element in printtools.progressbar(self):
+            element.model.sequences.load_conditions()
+
+    @printtools.print_progress
+    def save_conditions(self) -> None:
+        """Save the calculated conditions of the |Model| object handled by
+        each |Element| object."""
+        for element in printtools.progressbar(self):
+            element.model.sequences.save_conditions()
+
+    def trim_conditions(self) -> None:
+        """Call method |Sequences.trim_conditions| of the |Sequences|
+        object handled (indirectly) by each |Element| object."""
+        for element in self:
+            element.model.sequences.trim_conditions()
+
+    def reset_conditions(self) -> None:
+        """Call method |Sequences.reset| of the |Sequences| object
+        handled (indirectly) by each |Element| object."""
+        for element in self:
+            element.model.sequences.reset()
+
+    @property
+    def conditions(self) -> \
+            Dict[str, Dict[str, Dict[str, Union[float, numpy.ndarray]]]]:
+        """A nested dictionary containing the values of all
+        |ConditionSequence| objects of all currently handled models.
+
+        See the documentation on property |HydPy.conditions| for further
+        information.
+        """
+        return {element.name: element.model.sequences.conditions
+                for element in self}
+
+    @conditions.setter
+    def conditions(self, conditions: Dict[str,
+                                          Dict[str,
+                                               Dict[str,
+                                                    Union[float,
+                                                          numpy.ndarray]]]]):
+        for name, subconditions in conditions.items():
+            element = getattr(self, name)
+            element.model.sequences.conditions = subconditions
+
+    @printtools.print_progress
+    def prepare_allseries(self, ramflag: bool = True) -> None:
+        """Call method |Element.prepare_allseries| of all handled
+        |Element| objects."""
+        for element in printtools.progressbar(self):
+            element.prepare_allseries(ramflag)
+
+    @printtools.print_progress
+    def prepare_inputseries(self, ramflag: bool = True) -> None:
+        """Call method |Element.prepare_inputseries| of all handled
+        |Element| objects."""
+        for element in printtools.progressbar(self):
+            element.prepare_inputseries(ramflag)
+
+    @printtools.print_progress
+    def prepare_fluxseries(self, ramflag: bool = True) -> None:
+        """Call method |Element.prepare_fluxseries| of all handled
+        |Element| objects."""
+        for element in printtools.progressbar(self):
+            element.prepare_fluxseries(ramflag)
+
+    @printtools.print_progress
+    def prepare_stateseries(self, ramflag: bool = True) -> None:
+        """Call method |Element.prepare_stateseries| of all handled
+        |Element| objects."""
+        for element in printtools.progressbar(self):
+            element.prepare_stateseries(ramflag)
+
+    @printtools.print_progress
+    def load_allseries(self) -> None:
+        """Call methods |Elements.load_inputseries|,
+        |Elements.load_fluxseries|, and |Elements.load_stateseries|."""
+        self.load_inputseries()
+        self.load_fluxseries()
+        self.load_stateseries()
+
+    @printtools.print_progress
+    def load_inputseries(self) -> None:
+        """Call method |IOSequence.load_ext| of all |InputSequence| objects
+        with an activated |IOSequence.memoryflag|."""
+        self.__load_modelseries('inputs')
+
+    @printtools.print_progress
+    def load_fluxseries(self) -> None:
+        """Call method |IOSequence.load_ext| of all |FluxSequence| objects
+        with an activated |IOSequence.memoryflag|."""
+        self.__load_modelseries('fluxes')
+
+    @printtools.print_progress
+    def load_stateseries(self) -> None:
+        """Call method |IOSequence.load_ext| of all |StateSequence| objects
+        with an activated |IOSequence.memoryflag|."""
+        self.__load_modelseries('states')
+
+    def __load_modelseries(self, name_subseqs) -> None:
+        for element in printtools.progressbar(self):
+            sequences = element.model.sequences
+            subseqs = getattr(sequences, name_subseqs, ())
+            for seq in subseqs:
+                seq.load_ext()
+
+    @printtools.print_progress
+    def save_allseries(self) -> None:
+        """Call methods |Elements.save_inputseries|,
+        |Elements.save_fluxseries|, and |Elements.save_stateseries|."""
+        self.save_inputseries()
+        self.save_fluxseries()
+        self.save_stateseries()
+
+    @printtools.print_progress
+    def save_inputseries(self) -> None:
+        """Call method |IOSequence.save_ext| of all |InputSequence| objects
+        with an activated |IOSequence.memoryflag|."""
+        self.__save_modelseries('inputs')
+
+    @printtools.print_progress
+    def save_fluxseries(self) -> None:
+        """Call method |IOSequence.save_ext| of all |FluxSequence| objects
+        with an activated |IOSequence.memoryflag|."""
+        self.__save_modelseries('fluxes')
+
+    @printtools.print_progress
+    def save_stateseries(self) -> None:
+        """Call method |IOSequence.save_ext| of all |StateSequence| objects
+        with an activated |IOSequence.memoryflag|."""
+        self.__save_modelseries('states')
+
+    def __save_modelseries(self, name_subseqs) -> None:
+        for element in printtools.progressbar(self):
+            sequences = element.model.sequences
+            subseqs = getattr(sequences, name_subseqs, ())
+            for seq in subseqs:
+                if seq.memoryflag:
+                    seq.save_ext()
+
+
+class Device(Generic[DevicesTypeUnbound]):
+    # pylint: disable=abstract-method
+    # due to pylint issue https://github.com/PyCQA/pylint/issues/179
+    """Base class for class |Element| and class |Node|."""
+
+    def __new__(cls, value, *args, **kwargs):
+        # pylint: disable=unused-argument
+        # required for consistincy with __init__
+        name = str(value)
+        cls.__check_name(name)
+        try:
+            self = _registry[cls][name]
+        except KeyError:
+            self = object.__new__(cls)
+            vars(self)['name'] = name
+            vars(self)['new_instance'] = True
+            vars(self)['keywords'] = Keywords()
+            vars(self)['keywords'].device = self
+            _id2devices[self] = {}
+            _registry[cls][name] = self
+        _selection[cls][name] = _registry[cls][name]
+        return self
+
+    @classmethod
+    @abc.abstractmethod
+    def get_handlerclass(cls) -> Type:
+        """To be overridden."""
+
+    @classmethod
+    def query_all(cls) -> DevicesTypeUnbound:
+        """Get all |Node| or |Element| objects initialised so far.
+
+        See the main documentation on module |devicetools| for further
+        information.
+        """
+        return cls.get_handlerclass()(*_registry[cls].values())
+
+    @classmethod
+    def extract_new(cls) -> DevicesTypeUnbound:
+        """Gather all "new" |Node| or |Element| objects.
+
+        See the main documentation on module |devicetools| for further
+        information.
+        """
+        devices = cls.get_handlerclass()(*_selection[cls])
+        _selection[cls].clear()
+        return devices
+
+    @classmethod
+    def clear_all(cls) -> None:
+        """Clear the registry from all initialised |Node| or |Element| objects.
+
+        See the main documentation on module |devicetools| for further
+        information.
+        """
+        _selection[cls].clear()
+        _registry[cls].clear()
+
+    @property
+    def name(self) -> str:
+        """Name of the actual |Node| or |Element| object.
+
+        Device names serve as identifiers, as explained in the main
+        documentation on module |devicetools|. So define them carefully:
+
+        >>> from hydpy import Node
+        >>> Node.clear_all()
+        >>> node1, node2 = Node('n1'), Node('n2')
+        >>> node1 is Node('n1')
+        True
+        >>> node1 is Node('n2')
+        False
+
+        Each device name must be a valid variable identifier (see function
+        |valid_variable_identifier|), to allow for attribute access:
+
+        >>> from hydpy import Nodes
+        >>> nodes = Nodes(node1, 'n2')
+        >>> nodes.n1
+        Node("n1", variable="Q")
+
+        Invalid variable identifiers result in errors like the following:
+
+        >>> node3 = Node('n 3')   # doctest: +ELLIPSIS
+        Traceback (most recent call last):
+        ...
+        ValueError: While trying to initialize a `Node` object with value \
+`n 3` of type `str`, the following error occurred: The given name string \
+`n 3` does not define a valid variable identifier.  ...
+
+        When you change the name of a device (only do this for a good reason),
+        the corresponding keys of all related |Nodes| and |Elements| objects
+        (as well as of the internal registry) change automatically:
+
+        >>> Node.query_all()
+        Nodes("n1", "n2")
+        >>> node1.name = 'n1a'
+        >>> nodes
+        Nodes("n1a", "n2")
+        >>> Node.query_all()
+        Nodes("n1a", "n2")
+        """
+        return vars(self)['name']
+
+    @name.setter
+    def name(self, name: str) -> None:
+        self.__check_name(name)
+        for devices in _id2devices[self].values():
+            if hasattr(devices, self.name):
+                del devices[self.name]
+        del _registry[type(self)][self.name]
+        vars(self)['name'] = name
+        _registry[type(self)][self.name] = self
+        for devices in _id2devices[self].values():
+            devices[self.name] = self
+
+    @classmethod
+    def __check_name(cls, name: str) -> None:
+        try:
+            objecttools.valid_variable_identifier(name)
+        except ValueError:
+            objecttools.augment_excmessage(
+                f'While trying to initialize a `{objecttools.classname(cls)}` '
+                f'object with value `{name}` of type `'
+                f'{objecttools.classname(name)}`')
+
+    @property
+    def keywords(self) -> Keywords:
+        """Keywords describing the actual |Node| or |Element| object.
+
+        The keywords are contained within a |Keywords| object:
+
+        >>> from hydpy import Node
+        >>> node = Node('n', keywords='word0')
+        >>> node.keywords
+        Keywords("word0")
+
+        Assigning new words does not overwrite already existing ones.
+        You are allowed to add them individually or within iterable objects:
+
+        >>> node.keywords = 'word1'
+        >>> node.keywords = 'word2', 'word3'
+        >>> node.keywords
+        Keywords("word0", "word1", "word2", "word3")
+
+        Additionally, passing additional keywords to the constructor
+        of class |Node| or |Element| works also fine:
+
+        >>> Node('n', keywords=('word3', 'word4', 'word5'))
+        Node("n", variable="Q",
+             keywords=["word0", "word1", "word2", "word3", "word4", "word5"])
+
+        You can delete all keywords at once:
+
+        >>> del node.keywords
+        >>> node.keywords
+        Keywords()
+        """
+        return vars(self)['keywords']
+
+    @keywords.setter
+    def keywords(self, keywords: Mayberable1[str]) -> None:
+        keywords = tuple(objecttools.extract(keywords, (str,), True))
+        vars(self)['keywords'].update(*keywords)
+
+    @keywords.deleter
+    def keywords(self) -> None:
+        vars(self)['keywords'].clear()
+
+    def __str__(self):
+        return self.name
+
+    __dir__ = objecttools.dir_
+
+
+class Node(Device[Nodes]):
+    """Handles the data flow between |Element| objects.
+
+    |Node| objects always handle two sequences, a |Sim| object for
+    simulated values and an |Obs| object for measured values:
+
+    >>> from hydpy import Node
+    >>> node = Node('test')
+    >>> for sequence in node.sequences:
+    ...     print(sequence)
+    sim(0.0)
+    obs(0.0)
+
+    Each node can handle an arbitrary number of "input" and "output"
+    elements, available as instance attributes `entries` and `exits`,
+    respectively:
+
+    >>> node.entries
+    Elements()
+    >>> node.exits
+    Elements()
+
+    You cannot (or at least should not) add new elements manually:
+
+    >>> node.entries = 'element'
+    Traceback (most recent call last):
+    ...
+    AttributeError: can't set attribute
+    >>> node.exits.add_device('element')
+    Traceback (most recent call last):
+    ...
+    RuntimeError: While trying to add the device `element` to a \
+Elements object, the following error occurred: Adding devices to \
+immutable Elements objects is not allowed.
+
+    Instead, see the documentation on class |Element| on how to connect
+    |Node| and |Element| objects properly.
+    """
+
+    def __init__(self, value: NodeConstrArg, variable: Optional[str] = None,
+                 keywords: MayNonerable1[str] = None):
+        # pylint: disable=unused-argument
+        # required for consistincy with Device.__new__
+        if 'new_instance' in vars(self):
+            if variable is None:
+                vars(self)['variable'] = 'Q'
+            else:
+                vars(self)['variable'] = variable
+            vars(self)['entries'] = Elements(None, mutable=False)
+            vars(self)['exits'] = Elements(None, mutable=False)
+            self.__connections = (self.entries, self.exits)
+            self.sequences = sequencetools.NodeSequences(self)
+            vars(self)['deploymode'] = 'newsim'
+            self.__blackhole = pointerutils.Double(0.)
+            del vars(self)['new_instance']
+        if (variable is not None) and (variable != self.variable):
+            raise ValueError(
+                f'The variable to be represented by a '
+                f'{objecttools.classname(self)} instance cannot be changed.  '
+                f'The variable of node `{self.name}` is `{self.variable}` '
+                f'instead of `{variable}`.  Keep in mind, that `name` is '
+                f'the unique identifier of node objects.')
+        if keywords is not None:
+            self.keywords = keywords    # type: ignore
+            # due to internal type conversion
+            # see issue https://github.com/python/mypy/issues/3004
+
+    @classmethod
+    def get_handlerclass(cls) -> Type[Nodes]:
+        """Return class |Nodes|."""
+        return Nodes
+
+    @property
+    def entries(self) -> Elements:
+        """Group of |Element| objects which set the the simulated value
+        of the |Node| object."""
+        return vars(self)['entries']
+
+    @property
+    def exits(self) -> Elements:
+        """Group of |Element| objects which query the simulated or
+        observed value of the actual |Node| object."""
+        return vars(self)['exits']
+
+    @property
+    def variable(self) -> str:
+        """The variable handled by the actual |Node| object.
+
+        By default, nodes route discharge:
+
+        >>> from hydpy import Node
+        >>> node = Node('test1')
+        >>> node.variable
+        'Q'
+
+        Any other string is acceptable:
+
+        >>> Node('test2', variable='H')
+        Node("test2", variable="H")
+
+        To avoid confusion, one cannot change property |Node.variable|:
+
+        >>> node.variable = 'H'
+        Traceback (most recent call last):
+        ...
+        AttributeError: can't set attribute
+        >>> Node('test1', variable='H')
+        Traceback (most recent call last):
+        ...
+        ValueError: The variable to be represented by a Node instance \
+cannot be changed.  The variable of node `test1` is `Q` instead of `H`.  \
+Keep in mind, that `name` is the unique identifier of node objects.
+        """
+        return vars(self)['variable']
+
+    @property
+    def deploymode(self) -> str:
+        """Defines the kind of information a |Node| object offers.
+
+        *HydPy* supports the following modes:
+
+          * newsim: Deploy the simulated values calculated just recently.
+            `newsim` is the default mode, used, for example, when a node
+            receives a discharge value from an upstream element and passes
+            it to the downstream element directly.
+          * obs: Deploy observed values instead of simulated values.  The
+            node still receives the simulated values from its upstream
+            element(s).  However, it deploys values to its downstream
+            element(s) which are defined externally.  Usually, these values
+            are observations made available within a time series file. See
+            the documentation on module |sequencetools| for further
+            information on file specifications.
+          * oldsim: Similar to mode `obs`.  However, it is usually applied when
+            a node is supposed to deploy simulated values which have been
+            calculated in a previous simulation run and stored in a sequence
+            file.
+
+        The technical difference between modes `obs` and `oldsim` is that
+        the external values are either handled by the `obs` or the `sim`
+        sequence object.  Hence, if you select the `oldsim` mode, the
+        values of the upstream elements calculated within the current
+        simulation are not available (e.g. for parameter calibration)
+        after the simulation is finished.
+
+        >>> from hydpy import Node
+        >>> node = Node('test')
+        >>> node.deploymode
+        'newsim'
+        >>> node.deploymode = 'obs'
+        >>> node.deploymode
+        'obs'
+        >>> node.deploymode = 'oldsim'
+        >>> node.deploymode
+        'oldsim'
+        >>> node.deploymode = 'oldobs'
+        Traceback (most recent call last):
+        ...
+        ValueError: When trying to set the routing mode of node `test`, \
+the value `oldobs` was given, but only the following values are allowed: \
+`newsim`, `obs` and `oldsim`.
+        """
+        return vars(self)['deploymode']
+
+    @deploymode.setter
+    def deploymode(self, value: str) -> None:
+        if value == 'oldsim':
+            self.__blackhole = pointerutils.Double(0.)
+        elif value not in ('newsim', 'obs'):
+            raise ValueError(
+                f'When trying to set the routing mode of node `{self.name}`, '
+                f'the value `{value}` was given, but only the following '
+                f'values are allowed: `newsim`, `obs` and `oldsim`.')
+        vars(self)['deploymode'] = value
+        for element in itertools.chain(self.entries, self.exits):
+            model = getattr(element, 'model')
+            if model:
+                model.connect()
+
+    def get_double(self, group: str) -> pointerutils.Double:
+        """Return the |Double| object appropriate for the given |Element|
+        input or output group and the actual |Node.deploymode|.
+
+        Method |Node.get_double| should be of interest for framework
+        developers only (and eventually for model developers).
+
+        Let |Node| object `node1` handle different simulation and
+        observation values:
+
+        >>> from hydpy import Node
+        >>> node = Node('node1')
+        >>> node.sequences.sim = 1.0
+        >>> node.sequences.obs = 2.0
+
+        The following `test` function shows for a given |Node.deploymode|
+        if method |Node.get_double| either returns the |Double| object
+        handling the simulated value (1.0) or the |Double| object handling
+        the observed value (2.0):
+
+        >>> def test(deploymode):
+        ...     node.deploymode = deploymode
+        ...     for group in ('inlets', 'receivers', 'outlets', 'senders'):
+        ...         print(group, node.get_double(group))
+
+        In the default mode, nodes (passively) route simulated values
+        through offering the |Double| object of sequence |Sim| to all
+        |Element| input and output groups:
+
+        >>> test('newsim')
+        inlets 1.0
+        receivers 1.0
+        outlets 1.0
+        senders 1.0
+
+        Setting |Node.deploymode| to `obs` means that a node receives
+        simulated values (from group `outlets` or `senders`), but provides
+        observed values (to group `inlets` or `receivers`):
+
+        >>> test('obs')
+        inlets 2.0
+        receivers 2.0
+        outlets 1.0
+        senders 1.0
+
+        With |Node.deploymode| set to `oldsim`, the node provides
+        (previously) simulated values (to group `inlets` or `receivers`)
+        but does not receive any values.  Method |Node.get_double| just
+        returns a dummy |Double| object with value 0.0 in this case
+        (for group `outlets` or `senders`):
+
+        >>> test('oldsim')
+        inlets 1.0
+        receivers 1.0
+        outlets 0.0
+        senders 0.0
+
+        Other |Element| input or output groups are not supported:
+
+        >>> node.get_double('test')
+        Traceback (most recent call last):
+        ...
+        ValueError: Function `get_double` of class `Node` does not support \
+the given group name `test`.
+        """
+        if group in ('inlets', 'receivers'):
+            if self.deploymode != 'obs':
+                return self.sequences.fastaccess.sim
+            return self.sequences.fastaccess.obs
+        if group in ('outlets', 'senders'):
+            if self.deploymode != 'oldsim':
+                return self.sequences.fastaccess.sim
+            return self.__blackhole
+        raise ValueError(
+            f'Function `get_double` of class `Node` does not '
+            f'support the given group name `{group}`.')
+
+    def reset(self, idx: Optional[int] = None) -> None:
+        # pylint: disable=unused-argument
+        # required for consistincy with the other reset methods.
+        """Reset the actual value of the simulation sequence to zero.
+
+        >>> from hydpy import Node
+        >>> node = Node('node1')
+        >>> node.sequences.sim = 1.0
+        >>> node.reset()
+        >>> node.sequences.sim
+        sim(0.0)
+        """
+        self.sequences.fastaccess.sim[0] = 0.
+
+    def open_files(self, idx: int = 0) -> None:
+        """Call method |Sequences.open_files| of the |Sequences| object
+        handled by the actual |Node| object."""
+        self.sequences.open_files(idx)
+
+    def close_files(self) -> None:
+        """Call method |Sequences.close_files| of the |Sequences| object
+        handled by the actual |Node| object."""
+        self.sequences.close_files()
+
+    def prepare_allseries(self, ramflag: bool = True) -> None:
+        """Prepare the |IOSequence.series| object both of the |Sim| and the
+        |Obs| sequence.
+
+        Call this method before a simulation run if you need access to the
+        whole time series of the simulated and the observed series after the
+        simulation run is finished.
+
+        By default, the time series are stored in RAM, which is the faster
+        option.  If your RAM is limited, pass |False| to function argument
+        `ramflag` to store the series on disk.
+        """
+        self.prepare_simseries(ramflag)
+        self.prepare_obsseries(ramflag)
+
+    def prepare_simseries(self, ramflag: bool = True) -> None:
+        """Prepare the |IOSequence.series| object of the |Sim| sequence.
+
+        See method |Node.prepare_allseries| for further information.
+        """
+        self.__prepare_nodeseries('sim', ramflag)
+
+    def prepare_obsseries(self, ramflag: bool = True) -> None:
+        """Prepare the |IOSequence.series| object of the |Obs| sequence.
+
+        See method |Node.prepare_allseries| for further information.
+        """
+        self.__prepare_nodeseries('obs', ramflag)
+
+    def __prepare_nodeseries(self, seqname, ramflag) -> None:
+        seq = getattr(self.sequences, seqname)
+        if ramflag:
+            seq.activate_ram()
+        else:
+            seq.activate_disk()
+
+    def plot_allseries(self, **kwargs: Any) -> None:
+        """Plot the |IOSequence.series| data of both the |Sim| and
+        the |Obs| sequence object.
+
+        We demonstrate the functionalities of method |Node.plot_allseries|
+        based on the `Lahn` example project:
+
+        >>> from hydpy.examples import prepare_full_example_2
+        >>> hp, _, _ = prepare_full_example_2(lastdate='1997-01-01')
+
+        We perform a simulation run and calculate "observed" values for
+        node `dill`:
+
+        >>> hp.simulate()
+        >>> dill = hp.nodes.dill
+        >>> dill.sequences.obs.series = dill.sequences.sim.series + 10.0
+
+        Calling method |Node.plot_allseries| prints the time series of
+        both sequences to the screen immediately (if not, you need to
+        activate the interactive mode of `matplotlib` first):
+
+        >>> dill.plot_allseries()
+
+        Subsequent calls to |Node.plot_allseries| or the related methods
+        |Node.plot_simseries| and |Node.plot_obsseries| of nodes add
+        further time series data to the existing plot:
+
+        >>> lahn_1 = hp.nodes.lahn_1
+        >>> lahn_1.plot_simseries()
+
+        You can modify the appearance of the lines by passing different
+        arguments supported by `matplotlib`:
+
+        >>> lahn_1.sequences.obs.series = lahn_1.sequences.sim.series + 10.0
+        >>> lahn_1.plot_obsseries(color='black', linestyle='dashed')
+
+        Use the `pyplot` API of `matplotlib` directly for further
+        plot handling, e.g. for saving figures to disk:
+
+        >>> from matplotlib import pyplot
+        >>> from hydpy.docs import figs
+        >>> pyplot.savefig(figs.__path__[0] + '/Node_plot_allseries.png')
+        >>> pyplot.close()
+
+        .. image:: Node_plot_allseries.png
+        """
+        self.__plot_series(self.sequences, kwargs)
+
+    def plot_simseries(self, **kwargs: Any) -> None:
+        """Plot the |IOSequence.series| of the |Sim| sequence object.
+
+        See method |Node.plot_allseries| for further information.
+        """
+        self.__plot_series([self.sequences.sim], kwargs)
+
+    def plot_obsseries(self, **kwargs: Any) -> None:
+        """Plot the |IOSequence.series| of the |Obs| sequence object.
+
+        See method |Node.plot_allseries| for further information.
+        """
+        self.__plot_series([self.sequences.obs], kwargs)
+
+    def __plot_series(self, sequences: Iterable[sequencetools.IOSequence],
+                      kwargs: Dict) -> None:
+        index = _get_pandasindex()
+        for sequence in sequences:
+            name = ' '.join((self.name, sequence.name))
+            ps = pandas.Series(sequence.series, index=index)
+            ps.plot(label=name, **kwargs)
+        pyplot.legend()
+        if pyplot.get_fignums():
+            variable = self.variable
+            if variable == 'Q':
+                variable = u'Q [m³/s]'
+            pyplot.ylabel(variable)
+
+    def __repr__(self):
+        return self.assignrepr()
+
+    def assignrepr(self, prefix: str = '') -> str:
+        """Return a |repr| string with a prefixed assignment."""
+        lines = ['%sNode("%s", variable="%s",'
+                 % (prefix, self.name, self.variable)]
+        if self.keywords:
+            subprefix = '%skeywords=' % (' '*(len(prefix)+5))
+            with objecttools.repr_.preserve_strings(True):
+                with objecttools.assignrepr_tuple.always_bracketed(False):
+                    line = objecttools.assignrepr_list(
+                        sorted(self.keywords), subprefix, width=70)
+            lines.append(line + ',')
+        lines[-1] = lines[-1][:-1]+')'
+        return '\n'.join(lines)
+
+
+class Element(Device[Elements]):
+    """Handles a |Model| object and connects it to other models via
+    |Node| objects.
+
+    When preparing |Element| objects one links them to nodes of different
+    "groups", each group of nodes being implemented as an immutable
+    |Nodes| object.  |Element.inlets| and |Element.outlets| nodes handle,
+    for example, the inflow to and the outflow from the respective element.
+    |Element.receivers| and |Element.senders| nodes are thought for
+    information flow between arbitrary elements, for example to inform a
+    |dam| model about the discharge at a gauge downstream.
+
+    You can select nodes either by passing them explicitly or by passing
+    their name both as single objects or as objects contained within an
+    iterable object:
+
+    >>> from hydpy import Element, Node
+    >>> Element('test',
+    ...         inlets='in1',
+    ...         outlets=Node('out1'),
+    ...         receivers=('rec1', Node('rec2')))
+    Element("test",
+            inlets="in1",
+            outlets="out1",
+            receivers=["rec1", "rec2"])
+
+    Repeating such a statement with different nodes adds them to the
+    existing ones without any conflict in case of repeated specification:
+
+    >>> Element('test',
+    ...         inlets='in1',
+    ...         receivers=('rec2', 'rec3'),
+    ...         senders='sen1')
+    Element("test",
+            inlets="in1",
+            outlets="out1",
+            receivers=["rec1", "rec2", "rec3"],
+            senders="sen1")
+
+    Subsequent adding of nodes also works via property access:
+
+    >>> test = Element('test')
+    >>> test.inlets = 'in2'
+    >>> test.outlets = None
+    >>> test.receivers = ()
+    >>> test.senders = 'sen2', Node('sen3')
+    >>> test
+    Element("test",
+            inlets=["in1", "in2"],
+            outlets="out1",
+            receivers=["rec1", "rec2", "rec3"],
+            senders=["sen1", "sen2", "sen3"])
+
+    The properties verify that an element does not handle the same node
+    both within the `inlet` and the `outlet` group or within the `receiver`
+    and the `sender` group:
+
+    >>> test.inlets = 'out1'
+    Traceback (most recent call last):
+    ...
+    ValueError: For element `test`, the given inlet node `out1` is already \
+defined as a(n) outlet node, which is not allowed.
+    >>> test.outlets = 'in1'
+    Traceback (most recent call last):
+    ...
+    ValueError: For element `test`, the given outlet node `in1` is already \
+defined as a(n) inlet node, which is not allowed.
+    >>> test.receivers = 'sen1'
+    Traceback (most recent call last):
+    ...
+    ValueError: For element `test`, the given receiver node `sen1` is already \
+defined as a(n) sender node, which is not allowed.
+    >>> test.senders = 'rec1'
+    Traceback (most recent call last):
+    ...
+    ValueError: For element `test`, the given sender node `rec1` is already \
+defined as a(n) receiver node, which is not allowed.
+
+    Note that the discussed |Nodes| objects are immutable by default,
+    disallowing to change them in other ways as described above:
+
+    >>> test.inlets += 'in3'
+    Traceback (most recent call last):
+    ...
+    RuntimeError: While trying to add the device `in3` to a Nodes object, \
+the following error occurred: Adding devices to immutable Nodes objects \
+is not allowed.
+
+    Setting their `mutable` flag to |True| changes this behaviour:
+
+    >>> test.inlets.mutable = True
+    >>> test.inlets.add_device('in3')
+
+    However, then it is up to you to make sure that the added node also
+    handles the relevant element in the suitable group.  In the given
+    example, only node `in2` has been added properly but not node `in3`:
+
+    >>> test.inlets.in2.exits
+    Elements("test")
+    >>> test.inlets.in3.exits
+    Elements()
+    """
+
+    def __init__(
+            self, value: ElementConstrArg,
+            inlets: NodesConstrArg = None,
+            outlets: NodesConstrArg = None,
+            receivers: NodesConstrArg = None,
+            senders: NodesConstrArg = None,
+            keywords: MayNonerable1[str] = None):
+        # pylint: disable=unused-argument
+        # required for consistincy with Device.__new__
+        if hasattr(self, 'new_instance'):
+            vars(self)['inlets'] = Nodes(mutable=False)
+            vars(self)['outlets'] = Nodes(mutable=False)
+            vars(self)['receivers'] = Nodes(mutable=False)
+            vars(self)['senders'] = Nodes(mutable=False)
+            self.__connections = (self.inlets, self.outlets,
+                                  self.receivers, self.senders)
+            del vars(self)['new_instance']
+        self.keywords = keywords  # type: ignore
+        if inlets is not None:
+            self.inlets = inlets  # type: ignore
+        if outlets is not None:
+            self.outlets = outlets  # type: ignore
+        if receivers is not None:
+            self.receivers = receivers  # type: ignore
+        if senders is not None:
+            self.senders = senders  # type: ignore
+        # due to internal type conversion
+        # see issue https://github.com/python/mypy/issues/3004
+
+    def __update_group(self, values, elementtarget, nodetarget, comparetarget):
+        elementgroup: Nodes = getattr(self, elementtarget)
+        comparisongroup: Nodes = getattr(self, comparetarget)
+        elementtargetmutable = elementgroup.mutable
+        try:
+            elementgroup.mutable = True
+            for node in Nodes(values):
+                if node in comparisongroup:
+                    raise ValueError(
+                        f'For element `{self}`, the given {elementtarget[:-1]} '
+                        f'node `{node}` is already defined as a(n) '
+                        f'{comparetarget[:-1]} node, which is not allowed.')
+                elementgroup.add_device(node)
+                nodegroup: Elements = getattr(node, nodetarget)
+                nodegroupmutable = nodegroup.mutable
+                try:
+                    nodegroup.mutable = True
+                    nodegroup.add_device(self)
+                finally:
+                    nodegroup.mutable = nodegroupmutable
+        finally:
+            elementgroup.mutable = elementtargetmutable
+
+    @property
+    def inlets(self) -> Nodes:
+        """Group of |Node| objects from which the actual |Element| object
+        queries its "upstream" input values (e.g. inflow)."""
+        return vars(self)['inlets']
+
+    @inlets.setter
+    def inlets(self, values: NodesConstrArg):
+        self.__update_group(values, elementtarget='inlets',
+                            nodetarget='exits', comparetarget='outlets')
+
+    @property
+    def outlets(self) -> Nodes:
+        """Group of |Node| objects to which the actual |Element| object
+        passes its "downstream" output values (e.g. outflow)."""
+        return vars(self)['outlets']
+
+    @outlets.setter
+    def outlets(self, values: NodesConstrArg):
+        self.__update_group(values, elementtarget='outlets',
+                            nodetarget='entries', comparetarget='inlets')
+
+    @property
+    def receivers(self) -> Nodes:
+        """Group of |Node| objects from which the actual |Element| object
+        queries its "remote" information values (e.g. discharge at a
+        remote downstream)."""
+        return vars(self)['receivers']
+
+    @receivers.setter
+    def receivers(self, values: NodesConstrArg):
+        self.__update_group(values, elementtarget='receivers',
+                            nodetarget='exits', comparetarget='senders')
+
+    @property
+    def senders(self) -> Nodes:
+        """Group of |Node| objects to which the actual |Element| object
+        passes its "remote" information values (e.g. water level in
+        a |dam| model)."""
+        return vars(self)['senders']
+
+    @senders.setter
+    def senders(self, values: NodesConstrArg):
+        self.__update_group(values, elementtarget='senders',
+                            nodetarget='entries', comparetarget='receivers')
+
+    @classmethod
+    def get_handlerclass(cls) -> Type[Elements]:
+        """Return class |Elements|."""
+        return Elements
+
+    @property
+    def model(self) -> 'modeltools.Model':
+        """The |Model| object handled by the actual |Element| object.
+
+        Directly after their initialisation, elements do not know
+        which model they require:
+
+        >>> from hydpy import Element
+        >>> hland = Element('hland', outlets='outlet')
+        >>> hland.model
+        Traceback (most recent call last):
+        ...
+        AttributeError: The model object of element `hland` has been \
+requested but not been prepared so far.
+
+        During scripting and when working interactively in the Python
+        shell, it is often convenient to assign a |model| directly.
+
+        >>> from hydpy.models.hland_v1 import *
+        >>> parameterstep('1d')
+        >>> hland.model = model
+        >>> hland.model.name
+        'hland_v1'
+
+        >>> del hland.model
+        >>> hasattr(hland, 'model')
+        False
+
+        For the "usual" approach to prepare models, please see the method
+        |Element.prepare_model|.
+
+        The following examples show that assigning |Model| objects
+        to property |Element.model| creates some connection required by
+        the respective model type automatically .  These
+        examples  should be relevant for developers only.
+
+        The following |hbranch| model branches a single input value
+        (from to node `inp`) to multiple outputs (nodes `out1` and `out2`):
+
+        >>> from hydpy import Element, Node, reverse_model_wildcard_import
+        >>> reverse_model_wildcard_import()
+        >>> element = Element('a_branch',
+        ...                   inlets='branch_input',
+        ...                   outlets=('branch_output_1', 'branch_output_2'))
+        >>> inp = element.inlets.branch_input
+        >>> out1, out2 = element.outlets
+        >>> from hydpy.models.hbranch import *
+        >>> parameterstep()
+        >>> xpoints(0.0, 3.0)
+        >>> ypoints(branch_output_1=[0.0, 1.0], branch_output_2=[0.0, 2.0])
+        >>> parameters.update()
+        >>> element.model = model
+
+        To show that the inlet and outlet connections are built properly,
+        we assign a new value to the inlet node `inp` and verify that the
+        suitable fractions of this value are passed to the outlet nodes
+        out1` and `out2` by calling method |Model.simulate|:
+
+        >>> inp.sequences.sim = 999.0
+        >>> model.simulate(0)
+        >>> fluxes.input
+        input(999.0)
+        >>> out1.sequences.sim
+        sim(333.0)
+        >>> out2.sequences.sim
+        sim(666.0)
+        """
+        model = vars(self).get('model')
+        if model:
+            return model
+        raise AttributeError(
+            f'The model object of element `{self.name}` has '
+            f'been requested but not been prepared so far.')
+
+    @model.setter
+    def model(self, model: 'modeltools.Model') -> None:
+        vars(self)['model'] = model
+        model.element = self
+        model.connect()
+
+    @model.deleter
+    def model(self) -> None:
+        vars(self)['model'] = None
+
+    def prepare_model(self, clear_registry: bool = True) -> None:
+        """Load the control file of the actual |Element| object, initialise
+        its |Model| object, build the required connections via (an eventually
+        overridden version of) method |Model.connect| of class |Model|, and
+        update its  derived parameter values via calling (an eventually
+        overridden version) of method |Parameters.update| of class |Parameters|.
+
+        See method |HydPy.prepare_models| of class |HydPy| and property
+        |model| of class |Element| fur further information.
+        """
+        try:
+            try:
+                hydpy.pub.timegrids
+            except RuntimeError:
+                raise RuntimeError(
+                    'The initialisation period has not been defined via '
+                    'attribute `timegrids` of module `pub` yet but might '
+                    'be required to prepare the model properly.')
+            with hydpy.pub.options.warnsimulationstep(False):
+                info = hydpy.pub.controlmanager.load_file(
+                    element=self, clear_registry=clear_registry)
+                self.model = info['model']
+                self.model.parameters.update()
+        except OSError:
+            if hydpy.pub.options.warnmissingcontrolfile:
+                warnings.warn(
+                    f'Due to a missing or no accessible control file, no '
+                    f'model could be initialised for element `{self.name}`')
+            else:
+                objecttools.augment_excmessage(
+                    f'While trying to initialise the model '
+                    f'object of element `{self.name}`')
+        except BaseException:
+            objecttools.augment_excmessage(
+                f'While trying to initialise the model '
+                f'object of element `{self.name}`')
+
+    def init_model(self, clear_registry: bool = True) -> None:
+        """Deprecated: use method |Element.prepare_model| instead.
+
+        >>> from hydpy import Element
+        >>> from unittest import mock
+        >>> with mock.patch.object(Element, 'prepare_model') as mocked:
+        ...     element = Element('test')
+        ...     element.init_model(False)
+        Traceback (most recent call last):
+        ...
+        hydpy.core.exceptiontools.HydPyDeprecationWarning: \
+Method `init_model` of class `Element` is deprecated.  \
+Use method `prepare_model` instead.
+        >>> mocked.call_args_list
+        [call(False)]
+        """
+        self.prepare_model(clear_registry)
+        warnings.warn(
+            'Method `init_model` of class `Element` is deprecated.  '
+            'Use method `prepare_model` instead.',
+            exceptiontools.HydPyDeprecationWarning)
+
+    @property
+    def variables(self) -> Set[str]:
+        """A set of all different |Node.variable| values of the |Node|
+        objects directly connected to the actual |Element| object.
+
+        Suppose there is an element connected to five nodes, which (partly)
+        represent different variables:
+
+        >>> from hydpy import Element, Node
+        >>> element = Element('Test',
+        ...                   inlets=(Node('N1', 'X'), Node('N2', 'Y1')),
+        ...                   outlets=(Node('N3', 'X'), Node('N4', 'Y2')),
+        ...                   receivers=(Node('N5', 'X'), Node('N6', 'Y3')),
+        ...                   senders=(Node('N7', 'X'), Node('N8', 'Y4')))
+
+        Property |Element.variables| puts all the different variables of
+        these nodes together:
+
+        >>> sorted(element.variables)
+        ['X', 'Y1', 'Y2', 'Y3', 'Y4']
+        """
+        variables: Set[str] = set()
+        for connection in self.__connections:
+            variables.update(connection.variables)
+        return variables
+
+    def open_files(self, idx: int = 0) -> None:
+        """Call method |Sequences.open_files| of the |Sequences| object
+        handled (indirectly) by the actual |Element| object."""
+        self.model.sequences.open_files(idx)
+
+    def close_files(self) -> None:
+        """Call method |Sequences.close_files| of the |Sequences| object
+        handled (indirectly) by the actual |Element| object."""
+        self.model.sequences.close_files()
+
+    def prepare_allseries(self, ramflag: bool = True) -> None:
+        """Prepare the |IOSequence.series| objects of all `input`, `flux` and
+        `state` sequences of the model handled by this element.
+
+        Call this method before a simulation run, if you need access to
+        (nearly) all simulated series of the handled model after the
+        simulation run is finished.
+
+        By default, the time series are stored in RAM, which is the faster
+        option.  If your RAM is limited, pass |False| to function argument
+        `ramflag` to store the series on disk.
+        """
+        self.prepare_inputseries(ramflag)
+        self.prepare_fluxseries(ramflag)
+        self.prepare_stateseries(ramflag)
+
+    def prepare_inputseries(self, ramflag: bool = True) -> None:
+        """Prepare the |IOSequence.series| objects of the `input` sequences
+        of the model handled by this element.
+
+        See method |Element.prepare_allseries| for further information.
+        """
+        self.__prepare_series('inputs', ramflag)
+
+    def prepare_fluxseries(self, ramflag: bool = True) -> None:
+        """Prepare the |IOSequence.series| objects of the `flux` sequences
+        of the model handled by this element.
+
+        See method |Element.prepare_allseries| for further information.
+        """
+        self.__prepare_series('fluxes', ramflag)
+
+    def prepare_stateseries(self, ramflag: bool = True) -> None:
+        """Prepare the |IOSequence.series| objects of the `state` sequences
+        of the model handled by this element.
+
+        See method |Element.prepare_allseries| for further information.
+        """
+        self.__prepare_series('states', ramflag)
+
+    def __prepare_series(self, name_subseqs, ramflag) -> None:
+        subseqs = getattr(self.model.sequences, name_subseqs, None)
+        if subseqs:
+            if ramflag:
+                subseqs.activate_ram()
+            else:
+                subseqs.activate_disk()
+
+    def __plot(self, subseqs: sequencetools.SubSequences,
+               names: Optional[Iterable[str]], average: bool,
+               kwargs: Dict) -> None:
+        index = _get_pandasindex()
+        if names:
+            selseqs: Iterable[sequencetools.IOSequence] = (
+                getattr(subseqs, name) for name in names)
+        else:
+            selseqs = subseqs
+        for seq in selseqs:
+            label = kwargs.pop('label', ' '.join((self.name, seq.name)))
+            if average:
+                series = seq.average_series()
+                label = f'{label}, averaged'
+            else:
+                series = seq.series
+            if series.ndim == 1:
+                ps = pandas.Series(series, index=index)
+                ps.plot(label=label, **kwargs)
+            if series.ndim == 2:
+                ps = pandas.Series(series[:, 0], index=index)
+                axessubplot = ps.plot(label=label, **kwargs)
+                color = kwargs.pop('color', kwargs.pop('c', None))
+                kwargs['color'] = axessubplot.get_lines()[-1].get_color()
+                for j in range(1, series.shape[1]):
+                    ps = pandas.Series(series[:, j], index=index)
+                    ps.plot(**kwargs)
+                if color:
+                    kwargs['color'] = color
+                else:
+                    del kwargs['color']
+        lines = [line for line in pyplot.legend().get_lines()
+                 if line.get_label() != 'None']
+        pyplot.legend(handles=lines)
+
+    def plot_inputseries(
+            self, names: Optional[Iterable[str]] = None,
+            average: bool = False, **kwargs: Any) \
+            -> None:
+        """Plot (the selected) |InputSequence| |IOSequence.series| values.
+
+        We demonstrate the functionalities of method |Element.plot_inputseries|
+        based on the `Lahn` example project:
+
+        >>> from hydpy.examples import prepare_full_example_2
+        >>> hp, _, _ = prepare_full_example_2(lastdate='1997-01-01')
+
+        Without any arguments, |Element.plot_inputseries| prints the
+        time series of all input sequences handled by its |Model| object
+        directly to the screen (in the given example, |hland_inputs.P|,
+        |hland_inputs.T|, |hland_inputs.TN|, and |hland_inputs.EPN| of
+        application model |hland_v1|):
+
+        >>> land = hp.elements.land_dill
+        >>> land.plot_inputseries()
+
+        You can use the `pyplot` API of `matplotlib` to modify the figure
+        or to save it to disk (or print it to the screen, in case the
+        interactive mode of `matplotlib` is disabled):
+
+        >>> from matplotlib import pyplot
+        >>> from hydpy.docs import figs
+        >>> pyplot.savefig(figs.__path__[0] + '/Element_plot_inputseries.png')
+        >>> pyplot.close()
+
+        .. image:: Element_plot_inputseries.png
+
+        Methods |Element.plot_fluxseries| and |Element.plot_stateseries|
+        work in the same manner.  Before applying them, one has at first
+        to calculate the time series of the |FluxSequence| and
+        |StateSequence| objects:
+
+        >>> hp.simulate()
+
+        All three methods allow to select certain sequences by passing their
+        names (here, flux sequences |hland_fluxes.Q0| and |hland_fluxes.Q1|
+        of |hland_v1|). Additionally, you can pass the keyword arguments
+        supported by `matplotlib` for modifying the line style:
+
+        >>> land.plot_fluxseries(['q0', 'q1'], linewidth=2)
+
+        >>> pyplot.savefig(figs.__path__[0] + '/Element_plot_fluxseries.png')
+        >>> pyplot.close()
+
+        .. image:: Element_plot_fluxseries.png
+
+        For 1-dimensional |IOSequence| objects, all three methods plot the
+        individual time series in the same colour (here, from the state
+        sequences |hland_states.SP| and |hland_states.WC| of |hland_v1|):
+
+        >>> land.plot_stateseries(['sp', 'wc'])
+
+        >>> pyplot.savefig(figs.__path__[0] + '/Element_plot_stateseries1.png')
+        >>> pyplot.close()
+
+        .. image:: Element_plot_stateseries1.png
+
+        Alternatively, you can print the averaged time series through
+        passing |True| to the method `average` argument (demonstrated
+        for the state sequence |hland_states.SM|):
+
+        >>> land.plot_stateseries(['sm'], color='grey')
+        >>> land.plot_stateseries(
+        ...     ['sm'], average=True, color='black', linewidth=3)
+
+        >>> pyplot.savefig(figs.__path__[0] + '/Element_plot_stateseries2.png')
+        >>> pyplot.close()
+
+        .. image:: Element_plot_stateseries2.png
+        """
+        self.__plot(self.model.sequences.inputs, names, average, kwargs)
+
+    def plot_fluxseries(
+            self, names: Optional[Iterable[str]] = None,
+            average: bool = False, **kwargs: Any) \
+            -> None:
+        """Plot the `flux` series of the handled model.
+
+        See the documentation on method |Element.plot_inputseries| for
+        additional information.
+        """
+        self.__plot(self.model.sequences.fluxes, names, average, kwargs)
+
+    def plot_stateseries(
+            self, names: Optional[Iterable[str]] = None,
+            average: bool = False, **kwargs: Any) \
+            -> None:
+        """Plot the `state` series of the handled model.
+
+        See the documentation on method |Element.plot_inputseries| for
+        additional information.
+        """
+        self.__plot(self.model.sequences.states, names, average, kwargs)
+
+    def assignrepr(self, prefix: str) -> str:
+        """Return a |repr| string with a prefixed assignment."""
+        with objecttools.repr_.preserve_strings(True):
+            with objecttools.assignrepr_tuple.always_bracketed(False):
+                blanks = ' ' * (len(prefix) + 8)
+                lines = ['%sElement("%s",' % (prefix, self.name)]
+                for groupname in ('inlets', 'outlets', 'receivers', 'senders'):
+                    group = getattr(self, groupname, Node)
+                    if group:
+                        subprefix = '%s%s=' % (blanks, groupname)
+                        # pylint: disable=not-an-iterable
+                        # because pylint is wrong
+                        nodes = [str(node) for node in group]
+                        # pylint: enable=not-an-iterable
+                        line = objecttools.assignrepr_list(
+                            nodes, subprefix, width=70)
+                        lines.append(line + ',')
+                if self.keywords:
+                    subprefix = '%skeywords=' % blanks
+                    line = objecttools.assignrepr_list(
+                        sorted(self.keywords), subprefix, width=70)
+                    lines.append(line + ',')
+                lines[-1] = lines[-1][:-1]+')'
+                return '\n'.join(lines)
+
+    def __repr__(self):
+        return self.assignrepr('')
+
+
+_id2devices: Dict[Device, Dict[int, Devices]] = {}
+_registry: Mapping = {Node: {}, Element: {}}
+_selection: Mapping = {Node: {}, Element: {}}
+
+
+def gather_registries() -> Tuple[Dict, Mapping, Mapping]:
+    """Get and clear the current |Node| and |Element| registries.
+
+    Function |gather_registries| is thought to be used by class |Tester| only.
+    """
+    id2devices = copy.copy(_id2devices)
+    registry = copy.copy(_registry)
+    selection = copy.copy(_selection)
+    dict_ = globals()
+    dict_['_id2devices'] = {}
+    dict_['_registry'] = {Node: {}, Element: {}}
+    dict_['_selection'] = {Node: {}, Element: {}}
+    return id2devices, registry, selection
+
+
+def reset_registries(dicts: Tuple[Dict, Mapping, Mapping]):
+    """Reset the current |Node| and |Element| registries.
+
+    Function |reset_registries| is thought to be used by class |Tester| only.
+    """
+    dict_ = globals()
+    dict_['_id2devices'] = dicts[0]
+    dict_['_registry'] = dicts[1]
+    dict_['_selection'] = dicts[2]
+
+
+def _get_pandasindex():
+    """
+    >>> from hydpy import pub
+    >>> pub.timegrids = '2004.01.01', '2005.01.01', '1d'
+    >>> from hydpy.core.devicetools import _get_pandasindex
+    >>> _get_pandasindex()   # doctest: +ELLIPSIS
+    DatetimeIndex(['2004-01-01 12:00:00', '2004-01-02 12:00:00',
+    ...
+                   '2004-12-30 12:00:00', '2004-12-31 12:00:00'],
+                  dtype='datetime64[ns]', length=366, freq=None)
+    """
+    tg = hydpy.pub.timegrids.init
+    shift = tg.stepsize / 2
+    index = pandas.date_range(
+        (tg.firstdate + shift).datetime,
+        (tg.lastdate - shift).datetime,
+        (tg.lastdate - tg.firstdate - tg.stepsize) / tg.stepsize + 1)
+    return index
