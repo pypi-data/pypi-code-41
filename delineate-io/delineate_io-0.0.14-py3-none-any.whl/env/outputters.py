@@ -1,0 +1,30 @@
+import json
+
+class ConsoleOutputter(object):
+    """ConsoleOutputter writes the result to the console"""
+
+    def output(self, result):
+        """Prints to the console"""
+
+        print()
+        print(result)
+        print()
+
+
+class FileOutputter(object):
+    """FileOutputter writes the result to a specified file"""
+
+    def __init__(self, file_name):
+        """Initializes the FileOutputter
+
+        Args:
+            file_name (str): Name of the file to output
+        """
+
+        self.file_name = file_name
+        
+    def output(self, result):
+        
+        with open(self.file_name, 'w') as file:
+            json.dump(result, file)
+    
