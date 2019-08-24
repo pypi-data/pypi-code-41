@@ -1,0 +1,2 @@
+class ExceptionOnboarding(Exception):
+    pass
