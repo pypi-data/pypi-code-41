@@ -1,0 +1,2 @@
+class ExceptionClientSecret(Exception):
+    pass
