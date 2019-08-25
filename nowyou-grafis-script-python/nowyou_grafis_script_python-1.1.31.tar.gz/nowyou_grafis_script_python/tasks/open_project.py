@@ -1,0 +1,39 @@
+from ..ui_tools.UI_tools import Ui_tools
+from time import sleep
+
+
+class OpenProject:
+
+    @staticmethod
+    def run():
+        OpenProject.open_data()
+        OpenProject.open_file()
+        OpenProject.select_path()
+        OpenProject.input_file()
+        OpenProject.confirm()
+        OpenProject.close_dialog()
+        sleep(1)
+
+    # 2a
+    @staticmethod
+    def open_file():
+        Ui_tools.hot_key('ctrl', 'shift', 'o')
+
+    # 2c
+    @staticmethod
+    def select_path():
+        Ui_tools.hot_key('delete')
+
+    # 2d
+    @staticmethod
+    def input_file():
+        # TODO make as input parameter
+        Ui_tools.type("nowyou-test-grafis")
+
+    @staticmethod
+    def confirm():
+        Ui_tools.hot_key('enter')
+
+    @staticmethod
+    def close_dialog():
+        Ui_tools.hot_key('enter')
