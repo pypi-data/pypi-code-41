@@ -1,0 +1,39 @@
+# -*- coding: utf-8 -*-
+from distutils.core import setup
+
+packages = \
+['ghtopdep']
+
+package_data = \
+{'': ['*']}
+
+install_requires = \
+['cachecontrol>=0.12.5,<0.13.0',
+ 'click>=7.0,<8.0',
+ 'github3.py>=1.3,<2.0',
+ 'halo>=0.0.26,<0.0.27',
+ 'lockfile>=0.12.2,<0.13.0',
+ 'requests>=2.22,<3.0',
+ 'selectolax>=0.1.13,<0.2.0',
+ 'tabulate>=0.8.3,<0.9.0']
+
+entry_points = \
+{'console_scripts': ['ghtopdep = ghtopdep.ghtopdep:cli']}
+
+setup_kwargs = {
+    'name': 'ghtopdep',
+    'version': '0.1.6',
+    'description': 'CLI tool for sorting dependents repositories and packages by stars',
+    'long_description': '# GHTOPDEP\n[![image](https://img.shields.io/pypi/v/ghtopdep.svg)](https://pypi.org/project/ghtopdep/)\n[![image](https://img.shields.io/pypi/l/ghtopdep.svg)](https://pypi.org/project/ghtopdep/)\n[![image](https://img.shields.io/pypi/pyversions/ghtopdep.svg)](https://pypi.org/project/ghtopdep/)\n\nCLI tool for sorting dependents repo by stars\n\n## Requirements\n* Python 3.5 and up\n\n## Installation\nfrom PyPI\n```\n$ pip install ghtopdep\n```\n\nfrom git repository\n```\n$ pip install git+https://github.com/github-tooling/ghtopdep.git#egg=ghtopdep\n```\n\nfrom source\n```\n$ git clone https://github.com/github-tooling/ghtopdep\n$ cd ghtopdep\n$ python setup.py install\n```\n\n## Version upgrade\n```\n➜ pip install --upgrade ghtopdep   \n```\n\n## Usage\n\nIf you want retrieve packages or repositories description you need pass token.\nTo prevent rale limit being exceeded for unauthentIcated requests, ghtopdep needs an access token.\nFor public repositories, [create a token](https://github.com/settings/tokens/new?scopes=public_repo&description=ghtopdep) \nwith the public_repo permission.\n\nYou can use token as environment variable ``GHTOPDEP_TOKEN`` at ``~/.bashrc`` or ``~/.zshrc`` \n\nexport GHTOPDEP_TOKEN="****************************************"\n\nor pass token as option --token\n\n```\n➜ ghtopdep --help\nUsage: ghtopdep [OPTIONS] URL\n\nOptions:\n  --repositories / --packages  Sort repositories or packages (default\n                               repositories)\n  --description                Show description of packages or repositories\n                               (performs additional request per repository)\n  --show INTEGER               Number of showing repositories (default=10)\n  --more-than INTEGER          Minimum number of stars (default=5)\n  --token TEXT\n  --help                       Show this message and exit.\n```\n\n\n```\n➜ ghtopdep https://github.com/dropbox/dropbox-sdk-js\n+-------------------------------------------+---------+\n| URL                                       |   Stars |\n+===========================================+=========+\n| https://github.com/LN-Zap/zap-desktop     |     979 |\n+-------------------------------------------+---------+\n| https://github.com/Cleod9/syncmarx-webext |      35 |\n+-------------------------------------------+---------+\n| https://github.com/Playork/StickyNotes    |      32 |\n+-------------------------------------------+---------+\n| https://github.com/WebAssemblyOS/wasmos   |      23 |\n+-------------------------------------------+---------+\n| https://github.com/Cleod9/syncmarx-api    |      19 |\n+-------------------------------------------+---------+\n| https://github.com/Bearer/templates       |      11 |\n+-------------------------------------------+---------+\n| https://github.com/nathsimpson/isobel     |       9 |\n+-------------------------------------------+---------+\n| https://github.com/sorentycho/blackmirror |       8 |\n+-------------------------------------------+---------+\n| https://github.com/easylogic/edy          |       6 |\n+-------------------------------------------+---------+\n| https://github.com/Kikugumo/imas765probot |       5 |\n+-------------------------------------------+---------+\nfound 1173 repos others repos is private\nfound 281 repos with more than zero star\n~ via ⬢ v12.5.0 via 🐘 v7.2.19 via 🐍 3.5.7 took 36s \n```\n\nalso you can sort packages and fetch their description \n\n```\n➜ ghtopdep https://github.com/dropbox/dropbox-sdk-js --description --packages\n+--------------------------------------------------------+---------+--------------------------------------------------------------+\n| URL                                                    |   Stars | Description                                                  |\n+========================================================+=========+==============================================================+\n| https://github.com/jsbin/jsbin                         |    3919 | Collaborative JavaScript Debugging App                       |\n+--------------------------------------------------------+---------+--------------------------------------------------------------+\n| https://github.com/jvilk/BrowserFS                     |    1494 | BrowserFS is an in-browser filesystem that emulates the...   |\n+--------------------------------------------------------+---------+--------------------------------------------------------------+\n| https://github.com/coderaiser/cloudcmd                 |    1042 | ✨☁️📁✨ Cloud Commander file manager for the web with...      |\n+--------------------------------------------------------+---------+--------------------------------------------------------------+\n| https://github.com/robertknight/passcards              |     130 | A 1Password-compatible command-line and web-based...         |\n+--------------------------------------------------------+---------+--------------------------------------------------------------+\n| https://github.com/transloadit/uppy-server             |     115 | [DEPRECATED] \'Uppy Server\' was renamed to \'Companion\' and... |\n+--------------------------------------------------------+---------+--------------------------------------------------------------+\n| https://github.com/bioimagesuiteweb/bisweb             |      31 | This is the repository for the BioImage Suite Web Project    |\n+--------------------------------------------------------+---------+--------------------------------------------------------------+\n| https://github.com/sallar/dropbox-fs                   |      29 | :package: Node FS wrapper for Dropbox                        |\n+--------------------------------------------------------+---------+--------------------------------------------------------------+\n| https://github.com/NickTikhonov/up                     |      13 | Painless, context-aware file uploads from the command line   |\n+--------------------------------------------------------+---------+--------------------------------------------------------------+\n| https://github.com/soixantecircuits/altruist           |       8 | 💌 Gateway micro service for sharing content with ease ✌️     |\n+--------------------------------------------------------+---------+--------------------------------------------------------------+\n| https://github.com/OpenMarshal/npm-WebDAV-Server-Types |       5 | Bundle of \'file systems\' and \'serializers\' for the...        |\n+--------------------------------------------------------+---------+--------------------------------------------------------------+\nfound 130 packages others packages is private\nfound 57 packages with more than zero star\n```\n\n## Development setup\nUsing [Poetry](https://poetry.eustace.io/docs/)   \n```\n$ poetry install\n```\nor [Pipenv](https://docs.pipenv.org/)   \n```\n$ pipenv install --dev -e .\n```\n\n## License\n[MIT](https://choosealicense.com/licenses/mit/)\n',
+    'author': 'Andriy Orehov',
+    'author_email': 'andriyorehov@gmail.com',
+    'url': 'https://github.com/github-tooling/ghtopdep',
+    'packages': packages,
+    'package_data': package_data,
+    'install_requires': install_requires,
+    'entry_points': entry_points,
+    'python_requires': '>=3.5,<4.0',
+}
+
+
+setup(**setup_kwargs)
