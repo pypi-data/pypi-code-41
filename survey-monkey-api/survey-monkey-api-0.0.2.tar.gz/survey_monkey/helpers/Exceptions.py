@@ -1,0 +1,2 @@
+class SurveyMonkeyAPIException(Exception):
+    pass
