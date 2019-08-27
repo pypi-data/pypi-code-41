@@ -1,0 +1,2 @@
+class MetricFarmerExtension:
+    pass
