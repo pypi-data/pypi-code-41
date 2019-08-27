@@ -1,0 +1,25 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# @Project      : tql-CLI.
+# @File         : hdfs
+# @Time         : 2019-08-27 14:12
+# @Author       : yuanjie
+# @Email        : yuanjie@xiaomi.com
+# @Software     : PyCharm
+# @Description  : 
+
+import os
+
+class hdfs(object):
+
+    def __init__(self):
+        pass
+
+
+    def get(self):
+        pass
+
+    def getmerge(self):
+        pass
+
+
