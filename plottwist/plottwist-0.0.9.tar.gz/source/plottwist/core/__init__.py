@@ -1,0 +1,3 @@
+order = [
+    'plottwist.core.shelf'
+]
