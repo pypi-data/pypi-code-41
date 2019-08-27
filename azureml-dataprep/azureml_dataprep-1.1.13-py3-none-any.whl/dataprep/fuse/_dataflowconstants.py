@@ -1,0 +1,8 @@
+PORTABLE_PATH = 'PortablePath'
+RELATIVE_PATH = 'RelativePath'
+STREAM_PROPERTIES = 'StreamProperties'
+STREAM_SIZE = 'Size'
+LAST_MODIFIED = 'LastModifiedTime'
+CAN_STREAM = 'CanStream'
+CAN_SEEK = 'CanSeek'
+FUSE_READS_HANDLER = 'send_stream_data'
