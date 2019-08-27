@@ -1,0 +1,22 @@
+POLYAXON_HEADERS_CLI_VERSION = 'X_POLYAXON_CLI_VERSION'
+POLYAXON_HEADERS_CLIENT_VERSION = 'X_POLYAXON_CLIENT_VERSION'
+POLYAXON_HEADERS_INTERNAL = 'X_POLYAXON_INTERNAL'
+POLYAXON_HEADERS_OPERATOR = 'X_POLYAXON_OPERATOR'
+
+
+class PolyaxonServices(object):  # noqa
+    DOCKERIZER = 'dockerizer'
+    INITIALIZER = 'initializer'
+    SIDECAR = 'sidecar'
+    HELPER = 'helper'
+    RUNNER = 'runner'
+    CONTROLLER = 'controller'
+
+    VALUES = {
+        DOCKERIZER,
+        INITIALIZER,
+        SIDECAR,
+        HELPER,
+        RUNNER,
+        CONTROLLER
+    }
