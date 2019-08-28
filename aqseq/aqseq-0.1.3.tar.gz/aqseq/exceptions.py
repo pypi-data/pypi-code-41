@@ -1,0 +1,2 @@
+class AqSeqException(Exception):
+    pass
