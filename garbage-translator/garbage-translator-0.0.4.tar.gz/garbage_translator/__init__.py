@@ -1,0 +1,1 @@
+from garbage_translator.main import GarbageTranslator
