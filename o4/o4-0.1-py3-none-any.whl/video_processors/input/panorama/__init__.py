@@ -1,0 +1,1 @@
+from .stiching import Stitcher
