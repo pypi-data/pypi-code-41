@@ -1,0 +1,35 @@
+import numpy as np
+from sklearn import linear_model as lm
+
+def fitness(context, node):
+    return context['linear'][node].score(node.data.x, node.data.y)
+
+
+def stepwise_fitness(context, node):
+    fitnesses = []
+    coefficients = np.fabs(context['linear'][node].coef_)
+    sorted_dims = np.argsort(coefficients)
+    for i in range(len(sorted_dims)):
+        subspace = sorted_dims[:(i+1)]
+        model = lm.LinearRegression()
+        X = node.data.x[:, subspace]
+        Y = node.data.y
+        model.fit(X, Y)
+        fitnesses.append((sorted_dims[i], model.score(X, Y)))
+    return fitnesses
+
+
+def relative_fitness(context, has_mode, has_pts):
+    return context['linear'][has_mode].score(has_pts.data.x, has_pts.data.y)
+
+
+def parent_fitness(context, node):
+    if node.id == -1 or node.parent.id == -1:
+        return 0
+    return context['relative_fitness'][node.parent, node]
+
+
+def child_fitness(context, node):
+    if node.id == -1 or node.parent.id == -1:
+        return 0
+    return context['relative_fitness'][node, node.parent]
