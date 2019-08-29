@@ -1,0 +1,2 @@
+CLI_PACKAGE_NAME = 'onepanel'
+CLI_VERSION = '2.18.2.0b12'
