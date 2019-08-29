@@ -1,0 +1,2 @@
+from tuningdeap.tuningdeap import TuningDeap
+from tuningdeap.tuningbayes import TuningBayes
