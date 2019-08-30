@@ -1,0 +1,1 @@
+from .video_idtrackerai import IdTrackerVideo as Video
