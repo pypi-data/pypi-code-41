@@ -1,0 +1,1 @@
+from mesh_rpc.exp import MeshRPCException as MeshRPCException
