@@ -1,0 +1,1 @@
+from .path_idtrackerai import IdTrackerPath as Path
