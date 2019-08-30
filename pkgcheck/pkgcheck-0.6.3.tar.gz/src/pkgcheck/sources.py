@@ -1,0 +1,78 @@
+"""Custom package sources used for feeding addons."""
+
+from pkgcore.ebuild.repository import UnconfiguredTree
+from pkgcore.restrictions import packages
+from snakeoil.osutils import listdir_files, pjoin
+
+from . import addons, base
+
+
+class _RawRepo(UnconfiguredTree):
+    """Repository that allows matching against mismatched/invalid package names."""
+
+    def __init__(self, repo):
+        super().__init__(repo.location)
+
+    def _get_versions(self, catpkg):
+        """Pass through all packages that end with ".ebuild" extension.
+
+        Deviates from parent in that no package name check is done.
+        """
+        cppath = pjoin(self.base, catpkg[0], catpkg[1])
+        pkg = f'{catpkg[-1]}-'
+        lp = len(pkg)
+        extension = self.extension
+        ext_len = -len(extension)
+        try:
+            return tuple(
+                x[lp:ext_len] for x in listdir_files(cppath)
+                if x[ext_len:] == extension)
+        except EnvironmentError as e:
+            path = pjoin(self.base, os.sep.join(catpkg))
+            raise KeyError(f'failed fetching versions for package {path}: {e}') from e
+
+
+class RawRepoSource(base.GenericSource):
+    """Ebuild repository source returning raw CPV objects."""
+
+    feed_type = base.raw_versioned_feed
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.repo = _RawRepo(self.repo)
+
+    def __iter__(self):
+        yield from self.repo.itermatch(
+            self.limiter, sorter=sorted, raw_pkg_cls=base.RawCPV)
+
+
+class RestrictionRepoSource(base.GenericSource):
+    """Ebuild repository source supporting custom restrictions."""
+
+    def __init__(self, restriction, *args):
+        super().__init__(*args)
+        self.limiter = packages.AndRestriction(*(self.limiter, restriction))
+
+
+class FilteredRepoSource(base.GenericSource):
+    """Repository source that uses profiles/package.mask to filter packages."""
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.repo = self.options.domain.filter_repo(
+            self.repo, pkg_masks=(), pkg_unmasks=(),
+            pkg_accept_keywords=(), pkg_keywords=(), profile=False)
+
+
+class GitCommitsRepoSource(base.GenericSource):
+    """Repository source for locally changed packages in git history.
+
+    Parses local git log history to determine packages with changes that
+    haven't been pushed upstream yet.
+    """
+
+    required_addons = (addons.GitAddon,)
+
+    def __init__(self, options, git_addon, limiter):
+        super().__init__(options, limiter)
+        self.repo = git_addon.commits_repo(addons.GitChangedRepo)
