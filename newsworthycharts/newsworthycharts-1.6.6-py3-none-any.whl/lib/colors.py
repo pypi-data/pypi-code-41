@@ -1,0 +1,8 @@
+# Default colors
+STRONG = "5aa69d"
+NEUTRAL = "999999"
+POSITIVE = "1a9641"
+NEGATIVE = "d7191c"
+FILL_BETWEEN = "F7F4F4"
+WARM = "ff808f"
+COLD = "4062bb"
