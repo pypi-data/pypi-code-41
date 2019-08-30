@@ -1,0 +1,54 @@
+import numpy as np
+from sklearn.metrics import make_scorer, mean_squared_error, mean_squared_log_error
+from sklearn.metrics.scorer import SCORERS
+
+
+def neg_rmsle_score(y_true, y_pred):
+    return -np.sqrt(mean_squared_log_error(y_true, y_pred))
+
+
+def neg_rmse_score(y_true, y_pred):
+    return -np.sqrt(mean_squared_error(y_true, y_pred))
+
+
+def neg_mase_score(y_true, y_pred):
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    numerator = np.sum(np.abs(y_true - y_pred))
+    coeff = y_true.shape[0] / (y_true.shape[0] - 1)
+    denominator = np.sum(np.abs(y_true[1:] - y_true[:-1]))
+    if np.abs(denominator) < 1e-12:     # straight line
+        denominator = 1.0
+    return -numerator / (denominator * coeff)
+
+
+def neg_mape_score(y_true, y_pred):
+    eps = 1e-8
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    result = -np.sum(np.abs((y_true - y_pred) / (y_true + eps) )) / len(y_true)
+    return float(result)
+
+
+def mda_score(y_true, y_pred, epsilon=1e-6):
+    """ https://en.wikipedia.org/wiki/Mean_Directional_Accuracy """
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    n_elements = max(1, y_true[np.abs(y_true) > epsilon].shape[0])
+    true_sign = np.sign(y_true[1:] - y_true[:-1])
+    pred_sign = np.sign(y_pred[1:] - y_pred[:-1])
+    match = (true_sign == pred_sign).sum()
+    return match / float(n_elements)
+
+
+neg_rmsle_scorer = make_scorer(neg_rmsle_score)
+neg_mase_scorer = make_scorer(neg_mase_score)
+neg_mape_scorer = make_scorer(neg_mape_score)
+mda_scorer = make_scorer(mda_score)
+neg_rmse_scorer = make_scorer(neg_rmse_score)
+
+SCORERS['neg_rmsle'] = neg_rmsle_scorer
+SCORERS['neg_mase'] = neg_mase_scorer
+SCORERS['neg_mape'] = neg_mape_scorer
+SCORERS['mda'] = mda_scorer
+SCORERS['neg_rmse'] = neg_rmse_scorer
