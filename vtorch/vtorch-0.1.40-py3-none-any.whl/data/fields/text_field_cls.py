@@ -1,0 +1,65 @@
+import torch
+from .text_field import TextField
+from overrides import overrides
+from typing import Union, Dict
+
+from vtorch.data.tokenizers import Tokenizer
+
+
+from pytorch_transformers.tokenization_utils import PreTrainedTokenizer
+
+
+class TextFieldCLS(TextField):
+    """
+    A ``TextFieldCLS`` is a field for text storage, used for prepare text for a classification task.
+    Moreover, the text is preprocessed and tokenized here.
+    Available other methods as for base class ``TextField``
+
+    Parameters:
+    ------------
+    text: ``str``
+        Raw text
+    preprocessor:
+        An object for text preprocessing. Should have ``preprocess`` method which returns ``str``
+    tokenizer: ``Tokenizer``
+        An object for text tokenization. Should have ``tokenize`` method which returns ``List[str]``
+    max_padding_length: ``int`` (default = None)
+        Maximum length for the padded sequence
+    text_namespace: ``str`` (default = "text")
+        The namespace to use for converting tokens into integers. We map tokens to
+        integers for you (e.g., "I" and "am" get converted to 0, 1, ...),
+        and this namespace tells the ``Vocabulary`` object which mapping from strings to integers
+        to use.
+    cls_token_at_end: ``bool`` (default = False)
+        If `False` place CLS token at start, ``True`` – at end (only for XLNet)
+    pad_on_left: ``bool`` (default = False)
+        Padding left only for XLNet
+    """
+    def __init__(self, text: str, preprocessor, tokenizer: Union[Tokenizer, PreTrainedTokenizer],
+                 max_padding_length: int = None, text_namespace: str = "text", cls_token_at_end: bool = False,
+                 pad_on_left: bool = False) -> None:
+        super().__init__(text, preprocessor, tokenizer, max_padding_length, text_namespace)
+        self._cls_token_at_end = cls_token_at_end
+        self._pad_on_left = pad_on_left
+
+    @overrides
+    def _prepare(self, use_pretrained_tokenizer: bool = False):
+        preprocessed_text = self._preprocess(self.text)
+        self._tokenized_text = self._tokenize(preprocessed_text)
+        self._tokenized_text = self._tokenized_text + [self.tokenizer.sep_token]
+        if self._cls_token_at_end:
+            self._tokenized_text = self._tokenized_text + [self.tokenizer.cls_token]
+        else:
+            self._tokenized_text = [self.tokenizer.cls_token] + self._tokenized_text
+        self._indexed_tokens = self.tokenizer.convert_tokens_to_ids(self._tokenized_text)
+
+    @overrides
+    def as_tensor(self, padding_length: Dict[str, int]) -> torch.Tensor:
+        if self.sequence_length() >= padding_length["num_tokens"]:
+            return torch.LongTensor(self._indexed_tokens[:padding_length["num_tokens"]])
+        n_padded_elements = padding_length["num_tokens"] - self.sequence_length()
+        if self._pad_on_left:
+            return torch.cat([torch.zeros([n_padded_elements], dtype=torch.long),
+                              torch.LongTensor(self._indexed_tokens)])
+        return torch.cat([torch.LongTensor(self._indexed_tokens),
+                          torch.zeros([n_padded_elements], dtype=torch.long)])
