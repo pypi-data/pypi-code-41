@@ -1,0 +1,31 @@
+from django.utils.translation import gettext as _
+
+from juntagrico.entity.billing import *
+from juntagrico.lifecycle.share import check_share_consistency
+from juntagrico.util.bills import *
+
+
+class Share(Billable):
+    member = models.ForeignKey('Member', blank=True, on_delete=models.PROTECT)
+    paid_date = models.DateField(_('Bezahlt am'), null=True, blank=True)
+    issue_date = models.DateField(_('Ausgestellt am'), null=True, blank=True)
+    booking_date = models.DateField(_('Eingebucht am'), null=True, blank=True)
+    cancelled_date = models.DateField(_('Gekündigt am'), null=True, blank=True)
+    termination_date = models.DateField(
+        _('Gekündigt auf'), null=True, blank=True)
+    payback_date = models.DateField(
+        _('Zurückbezahlt am'), null=True, blank=True)
+    number = models.IntegerField(
+        _('Anteilschein Nummer'), null=True, blank=True)
+    notes = models.TextField(
+        _('Notizen'), max_length=1000, default='', blank=True)
+
+    def clean(self):
+        check_share_consistency(self)
+
+    def __str__(self):
+        return _('Anteilschein {0}').format(self.id)
+
+    class Meta:
+        verbose_name = Config.vocabulary('share')
+        verbose_name_plural = Config.vocabulary('share_pl')
