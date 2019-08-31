@@ -1,0 +1,42 @@
+class Report:
+    def __init__(self, soft=True):
+        self.soft = soft
+        self.errors = []
+
+    def __repr__(self):
+        return "<Report soft={} {}>".format(self.soft, self.errors)
+
+    def __str__(self):
+        return "\n".join(self.errors)
+
+    def __len__(self):
+        return len(self.errors)
+
+    def __eq__(self, other):
+        if isinstance(other, list):
+            other = "\n".join(other)
+        return str(self) == str(other)
+
+    def __ne__(self, other):
+        if isinstance(other, list):
+            other = "\n".join(other)
+        return str(self) != str(other)
+
+    def __contains__(self, item):
+        return str(item) in self.errors
+
+    def has_errors(self):
+        return bool(self.errors)
+
+    def merge(self, report):
+        self.errors.extend(report.errors)
+        return True
+
+    def add(self, error_message):
+        self.errors.append(error_message)
+        return True
+
+    def add_or_raise(self, error_message, exception):
+        if self.soft:
+            return self.add(error_message)
+        raise exception(error_message)
