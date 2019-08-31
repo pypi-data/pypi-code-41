@@ -1,0 +1,2 @@
+class InvalidTagError(Exception):
+    pass
