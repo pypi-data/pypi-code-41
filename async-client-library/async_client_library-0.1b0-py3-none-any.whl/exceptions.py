@@ -1,0 +1,1 @@
+from base_client_library.exceptions import BaseException
