@@ -1,0 +1,82 @@
+
+from __future__ import annotations
+
+__all__ = ('Config',)
+
+from pathlib import Path
+from typing import Optional, Union
+
+import click
+import pydantic
+
+try:
+    from typing import Literal      # type: ignore
+except ImportError:
+    from typing_extensions import Literal
+
+
+_my_path = Path(__file__)
+_default_config_dir = lambda: click.get_app_dir('instawow')
+
+
+def _expand_path(value: Union[str, Path]) -> Path:
+    return Path(value).expanduser().resolve()
+
+
+class _Config(pydantic.BaseSettings):
+
+    ValidationError = pydantic.ValidationError
+
+    config_dir: Path = _my_path
+    addon_dir: Path
+    game_flavour: Literal['retail', 'classic']
+
+    @pydantic.validator('config_dir', always=True, pre=True)
+    def __ensure_config_dir(cls, value: Union[str, Path]) -> Path:
+        if value == _my_path:
+            value = _default_config_dir()
+        return _expand_path(value)
+
+    @pydantic.validator('addon_dir')
+    def __transform_addon_dir(cls, value: Path) -> Path:
+        value = _expand_path(value)
+        if not value.is_dir():
+            raise ValueError('folder does not exist')
+        return value
+
+    @property
+    def is_classic(self) -> bool:
+        return self.game_flavour == 'classic'
+
+    @property
+    def logger_dir(self) -> Path:
+        return self.config_dir / 'logs'
+
+    @property
+    def plugin_dir(self) -> Path:
+        return self.config_dir / 'plugins'
+
+    def json(self, **kwargs) -> str:
+        return super().json(exclude={'config_dir'}, indent=2)
+
+    @classmethod
+    def read(cls) -> _Config:
+        dummy_config = cls(addon_dir='', game_flavour='retail')
+        return cls.parse_raw((dummy_config.config_dir / 'config.json')
+                             .read_text(encoding='utf-8'))
+
+    def write(self) -> _Config:
+        for dir_ in (self.config_dir,
+                     self.logger_dir,
+                     self.plugin_dir):
+            dir_.mkdir(exist_ok=True)
+
+        (self.config_dir / 'config.json').write_text(self.json(),
+                                                     encoding='utf-8')
+        return self
+
+    class Config:
+        env_prefix = 'INSTAWOW_'
+
+
+Config = _Config
