@@ -1,0 +1,24 @@
+# coding: UTF-8
+from sys import version_info as __1l_opy_
+l1l1_opy_ = __1l_opy_[0] == 2
+l1l1l_opy_ = 2048
+l1ll_opy_ = 7
+def l1ll1_opy_ (ll_opy_):
+    global l111l_opy_
+    l1llll_opy_ = ord (ll_opy_ [-1])
+    l111_opy_ = ll_opy_ [:-1]
+    l11ll_opy_ = l1llll_opy_ % len (l111_opy_)
+    l11_opy_ = l111_opy_ [:l11ll_opy_] + l111_opy_ [l11ll_opy_:]
+    if l1l1_opy_:
+        l1_opy_ = l1lll1_opy_ () .join ([l11l1_opy_ (ord (char) - l1l1l_opy_ - (l1111_opy_ + l1llll_opy_) % l1ll_opy_) for l1111_opy_, char in enumerate (l11_opy_)])
+    else:
+        l1_opy_ = str () .join ([chr (ord (char) - l1l1l_opy_ - (l1111_opy_ + l1llll_opy_) % l1ll_opy_) for l1111_opy_, char in enumerate (l11_opy_)])
+    return eval (l1_opy_)
+import l1ll1l_opy_
+import l1l11l_opy_
+l111l1_opy_ = l1l11l_opy_.l11lll_opy_ (l1ll1_opy_ (u"ࠨ࡙ࡵࡥ࡫࡬ࠧࠄ"))
+l1lll1l_opy_ = l1l11l_opy_.l11lll_opy_ (l1ll1_opy_ (u"ࠩࡋࡳࡼࡲࠧࠅ"))
+you = l1ll1l_opy_.l1lll_opy_ ()
+l1111l_opy_ = l1ll1l_opy_.l1l11_opy_ () # l11111_opy_ your l1llll1_opy_
+you.walk (l111l1_opy_)
+l1111l_opy_.walk (l1lll1l_opy_)
