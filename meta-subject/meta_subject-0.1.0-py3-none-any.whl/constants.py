@@ -1,0 +1,5 @@
+APPT = "appt"
+APPT_OTHER = "other_routine_appt"
+BLOOD_RESULTS_ACTION = "abnormal-blood-result"
+FASTING = "fasting"
+NON_FASTING = "non_fasting"
