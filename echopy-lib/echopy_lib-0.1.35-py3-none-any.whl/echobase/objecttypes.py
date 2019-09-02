@@ -1,0 +1,20 @@
+#: Object types for object ids
+object_type = {}
+object_type["null"] = 0
+object_type["base"] = 1
+object_type["account"] = 2
+object_type["asset"] = 3
+object_type["committee_member"] = 4
+object_type["proposal"] = 5
+object_type["operation_history"] = 6
+object_type["vesting_balance"] = 7
+object_type["balance"] = 8
+object_type["contract"] = 9
+object_type["contract_result"] = 10
+object_type["block_result"] = 11
+object_type["eth_address"] = 12
+object_type["deposit_eth"] = 13
+object_type["withdraw_eth"] = 14
+object_type["erc20_token"] = 15
+object_type["deposit_erc20_token"] = 16
+object_type["withdraw_erc20_token"] = 17
