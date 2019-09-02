@@ -1,0 +1,71 @@
+# Copyright 2019 Patrick Kidger. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+# 
+#    http://www.apache.org/licenses/LICENSE-2.0
+# 
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# =========================================================================
+"""Provides operations relating to Lyndon words and Lyndon brackets."""
+
+
+# noinspection PyUnresolvedReferences
+from . import _impl
+
+
+# noinspection PyUnreachableCode
+if False:
+    from typing import List, Tuple, Union
+    # what we actually want, but can't make sense of in the auto-generated documentation
+    # LyndonBracket = Union[int, List['LyndonBracket']]
+    LyndonBracket = Union[int, List]
+
+
+def lyndon_words(channels, depth):
+    # type: (int, int) -> List[List[int]]
+    r"""Computes the collection of all Lyndon words up to length :attr:`depth` in an alphabet of size
+    :attr:`channels`. Each letter is represented by an integer :math:`i` in the range
+    :math:`0 \leq i < \text{channels}`.
+
+    Arguments:
+        channels (int): The size of the alphabet.
+        depth (int): The maximum word length.
+
+    Returns:
+        A list of lists of integers. Each sub-list corresponds to one Lyndon word. The words are ordered by length, and
+        then ordered lexicographically within each length class.
+    """
+
+    return _impl.lyndon_words(channels, depth)
+
+
+def lyndon_brackets(channels, depth):
+    # type: (int, int) -> List[LyndonBracket]
+    r"""Computes the collection of all Lyndon words, in their standard bracketing, up to length :attr:`depth` in an
+    alphabet of size :attr:`channels`. Each letter is represented by an integer :math:`i` in the range
+    :math:`0 \leq i < \text{channels}`.
+
+    Arguments:
+        channels (int): The size of the alphabet.
+        depth (int): The maximum word length.
+
+    Returns:
+        A list. Each element corresponds to a single Lyndon word with its standard bracketing. The words are ordered by
+        length, and then ordered lexicographically within each length class."""
+
+    return _impl.lyndon_brackets(channels, depth)
+
+
+def lyndon_words_to_basis_transform(channels, depth):
+    # type: (int, int) -> List[Tuple[int, int, int]]
+    """Computes the collection of transforms needed to go from a basis of the free Lie algebra in terms of Lyndon words
+    to a basis of the free Lie algebra in terms of the Lyndon basis."""
+    # TODO: think about documenting this? It's a bit of an obscure function
+
+    return _impl.lyndon_words_to_basis_transform(channels, depth)
