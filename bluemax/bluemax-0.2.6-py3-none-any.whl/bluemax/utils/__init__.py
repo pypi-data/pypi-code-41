@@ -1,0 +1,1 @@
+from .proc_utils import qname_to_class
