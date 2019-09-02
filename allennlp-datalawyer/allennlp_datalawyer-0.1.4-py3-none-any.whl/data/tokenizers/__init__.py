@@ -1,0 +1,1 @@
+from allennlp_datalawyer.data.tokenizers.word_splitter import MosesWordSplitter
