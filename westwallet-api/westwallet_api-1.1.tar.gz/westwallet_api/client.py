@@ -1,0 +1,119 @@
+import requests
+from .structures import Balance, Transaction, GenerateAddressResponse
+from .exceptions import *
+import json
+
+class WestWalletAPI:
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.base_url = "https://api.westwallet.info"
+        self.headers = {
+            "X-API-KEY": api_key,
+            "Content-Type": "application/json"
+        }
+
+    def _make_get_request(self, method_url: str, params: dict = None):
+        return requests.get("{}{}".format(self.base_url, method_url),
+                            params=params,
+                            headers=self.headers)
+
+    def _make_post_request(self, method_url: str, data: dict):
+        return requests.post("{}{}".format(self.base_url, method_url),
+                             data=json.dumps(data),
+                             headers=self.headers)
+
+    def wallet_balance(self, currency: str) -> Balance:
+        params = {
+            "currency": currency
+        }
+        method_url = "/wallet/balance"
+
+        response = self._make_get_request(method_url, params)
+
+        self._check_errors(response)
+        response_json = response.json()
+        response_json.pop('error')
+
+        return Balance(response_json['balance'], response_json['currency'])
+
+    def wallet_balances(self):
+        method_url = "/wallet/balances"
+        response = self._make_get_request(method_url)
+
+        self._check_errors(response)
+        response_json = response.json()
+        response_json.pop('error')
+
+        return response_json
+
+    def create_withdrawal(self, currency: str, amount: float,
+                          address: str, dest_tag: str = "",
+                          description: str = "") -> Transaction:
+        data = {
+            "currency": currency,
+            "amount": amount,
+            "address": address,
+            "dest_tag": dest_tag,
+            "description": description
+        }
+
+        method_url = "/wallet/create_withdrawal"
+        response = self._make_post_request(method_url, data)
+
+        self._check_errors(response)
+        response_json = response.json()
+        response_json.pop('error')
+
+        transaction = Transaction(
+            **response_json
+        )
+        return transaction
+
+    def transaction_info(self, id: int) -> Transaction:
+        data = {
+            "id": id
+        }
+
+        method_url = "/wallet/transaction"
+        response = self._make_post_request(method_url, data)
+
+        self._check_errors(response)
+        response_json = response.json()
+        response_json.pop('error')
+
+        transaction = Transaction(
+            **response_json
+        )
+        return transaction
+
+    def generate_address(self, currency: str, ipn_url: str = "", label: str = "") -> GenerateAddressResponse:
+        data = {
+            "currency": currency,
+            "ipn_url": ipn_url,
+            "label": label
+        }
+
+        method_url = "/address/generate"
+        response = self._make_post_request(method_url, data)
+
+        response_json = response.json()
+        self._check_errors(response)
+        response_json.pop('error')
+
+        generate_address_response = GenerateAddressResponse(
+            **response_json
+        )
+        return generate_address_response
+
+    def _check_errors(self, response):
+        if response.status_code == 401:
+            raise WrongCredentialsException
+        response_json = response.json()
+        error = response_json.get('error')
+        if response_json.get('message'):
+            raise IPNotAllowedException
+        if error != 'ok':
+            expception = exceptions.get(error)
+            if expception:
+                raise expception
+            raise WestWalletAPIException(response['error'])
