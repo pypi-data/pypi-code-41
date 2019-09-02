@@ -1,0 +1,4 @@
+from .blood_results_glu_admin import BloodResultsGluAdmin
+from .blood_results_fbc_admin import BloodResultsFbcAdmin
+from .blood_results_rft_admin import BloodResultsRftAdmin
+from .blood_results_lft_admin import BloodResultsLftAdmin
