@@ -1,0 +1,15 @@
+config = {
+    'include_dirs': '',
+    'define_macros': '',
+    'undef_macros': '',
+    'library_dirs': '',
+    'libraries': '',
+    'runtime_library_dirs': '',
+    'extra_objects': '',
+    'extra_compile_args': '',
+    'extra_link_args': '',
+    'export_symbols': '',
+    'depends': '',
+    'language': '',
+    'optional': False,
+}
