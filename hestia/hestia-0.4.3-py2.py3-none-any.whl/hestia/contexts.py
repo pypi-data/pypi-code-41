@@ -1,0 +1,7 @@
+CODE_CONTEXT = "/plx-context/code"
+BUILD_CONTEXT = "/plx-context/build"
+AUTH_CONTEXT = "/plx-context/context"
+OUTPUTS_CONTEXT = "/plx-context/outputs"
+ARTIFACTS_CONTEXT = "/plx-context/artifacts/{}"
+SHM_CONTEXT = "/dev/shm"
+DOCKER_CONTEXT = "/var/run/docker.sock"
