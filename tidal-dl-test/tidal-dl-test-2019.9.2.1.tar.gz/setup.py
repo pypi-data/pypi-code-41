@@ -1,0 +1,19 @@
+from setuptools import setup, find_packages
+setup(
+    name = 'tidal-dl-test',
+    version="2019.9.2.1",
+    license = "MIT Licence",
+    description = "Tidal Music Download.",
+
+    author = 'YaronH',
+    author_email = "yaronhuang@qq.com",
+
+    packages = find_packages(),
+    include_package_data = True,
+    platforms = "any",
+    install_requires=["aigpy>=2019.9.2.0", "requests",
+                      "ffmpeg", "pycryptodome", "pydub", ],
+
+    entry_points={'console_scripts': [
+        'tidal-dl2 = tidal_dl:main', ]}
+)
