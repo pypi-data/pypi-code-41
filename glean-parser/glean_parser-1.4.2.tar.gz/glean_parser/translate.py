@@ -1,0 +1,81 @@
+# -*- coding: utf-8 -*-
+
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+"""
+High-level interface for translating `metrics.yaml` into other formats.
+"""
+
+from pathlib import Path
+import os
+import shutil
+import sys
+import tempfile
+
+from . import parser
+from . import kotlin
+from . import markdown
+
+
+# Each outputter in the table has the following keys:
+# - "output_func": the main function of the outputter, the one which
+#   does the actual translation.
+# - "clear_output_dir": a flag to clear the target directory before moving there
+#   the generated files.
+OUTPUTTERS = {
+    "kotlin": {"output_func": kotlin.output_kotlin, "clear_output_dir": True},
+    "markdown": {"output_func": markdown.output_markdown, "clear_output_dir": False},
+}
+
+
+def translate(input_filepaths, output_format, output_dir, options={}, parser_config={}):
+    """
+    Translate the files in `input_filepaths` to the given `output_format` and
+    put the results in `output_dir`.
+
+    :param input_filepaths: list of paths to input metrics.yaml files
+    :param output_format: the name of the output formats
+    :param output_dir: the path to the output directory
+    :param options: dictionary of options. The available options are backend
+        format specific.
+    :param parser_config: A dictionary of options that change parsing behavior.
+        See `parser.parse_metrics` for more info.
+    """
+    if output_format not in OUTPUTTERS:
+        raise ValueError(f"Unknown output format '{output_format}'")
+
+    all_objects = parser.parse_objects(input_filepaths, parser_config)
+    found_error = False
+    for error in all_objects:
+        found_error = True
+        print("=" * 78, file=sys.stderr)
+        print(error, file=sys.stderr)
+    if found_error:
+        return 1
+
+    # Write everything out to a temporary directory, and then move it to the
+    # real directory, for transactional integrity.
+    with tempfile.TemporaryDirectory() as tempdir:
+        tempdir_path = Path(tempdir)
+        OUTPUTTERS[output_format]["output_func"](
+            all_objects.value, tempdir_path, options
+        )
+
+        if OUTPUTTERS[output_format]["clear_output_dir"]:
+            if output_dir.is_file():
+                output_dir.unlink()
+            elif output_dir.is_dir():
+                shutil.rmtree(output_dir)
+
+            shutil.copytree(tempdir, output_dir)
+        else:
+            # We can't use shutil.copytree alone if the directory already exists.
+            # However, if it doesn't exist, make sure to create one otherwise
+            # shutil.copy will fail.
+            os.makedirs(output_dir, exist_ok=True)
+            for filename in tempdir_path.glob("*"):
+                shutil.copy(filename, output_dir)
+
+    return 0
