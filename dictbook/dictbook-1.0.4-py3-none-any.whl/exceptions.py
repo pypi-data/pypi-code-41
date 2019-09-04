@@ -1,0 +1,3 @@
+class NetworkNotConnected(Exception):
+    pass
+    
