@@ -1,0 +1,38 @@
+"""This is a wrapper for the c-implementation of the seabreeze-library
+
+"""
+# noinspection PyUnresolvedReferences,PyProtectedMember
+from seabreeze.cseabreeze._wrapper import (SeaBreezeAPI,
+                                           SeaBreezeError,
+                                           SeaBreezeNumFeaturesError,
+                                           SeaBreezeDevice,
+                                           SeaBreezeFeature,
+                                           SeaBreezeRawUSBBusAccessFeature,
+                                           SeaBreezeSpectrometerFeature,
+                                           SeaBreezePixelBinningFeature,
+                                           SeaBreezeThermoElectricFeature,
+                                           SeaBreezeIrradCalFeature,
+                                           SeaBreezeEthernetConfigurationFeature,
+                                           SeaBreezeMulticastFeature,
+                                           SeaBreezeIPv4Feature,
+                                           SeaBreezeDHCPServerFeature,
+                                           SeaBreezeNetworkConfigurationFeature,
+                                           SeaBreezeWifiConfigurationFeature,
+                                           SeaBreezeGPIOFeature,
+                                           SeaBreezeEEPROMFeature,
+                                           SeaBreezeLightSourceFeature,
+                                           SeaBreezeStrobeLampFeature,
+                                           SeaBreezeContinuousStrobeFeature,
+                                           SeaBreezeShutterFeature,
+                                           SeaBreezeNonlinearityCoefficientsFeature,
+                                           SeaBreezeTemperatureFeature,
+                                           SeaBreezeIntrospectionFeature,
+                                           SeaBreezeSpectrumProcessingFeature,
+                                           SeaBreezeRevisionFeature,
+                                           SeaBreezeOpticalBenchFeature,
+                                           SeaBreezeStrayLightCoefficientsFeature,
+                                           SeaBreezeDataBufferFeature,
+                                           SeaBreezeFastBufferFeature,
+                                           SeaBreezeAcquisitionDelayFeature,
+                                           SeaBreezeI2CMasterFeature)
+_backend_ = 'cseabreeze'
