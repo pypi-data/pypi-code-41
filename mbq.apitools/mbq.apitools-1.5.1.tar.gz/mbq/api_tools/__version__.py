@@ -1,0 +1,7 @@
+__author__ = "Managed by Q, Inc."
+__author_email__ = "open-source@managedbyq.com"
+__description__ = "MBQ APITools"
+__license__ = "Apache 2.0"
+__title__ = "mbq.apitools"
+__url__ = "https://github.com/managedbyq/mbq.apitools"
+__version__ = "1.5.1"
