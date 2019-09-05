@@ -1,0 +1,29 @@
+from sacremoses import MosesTokenizer as _MosesTokenizer
+from sacremoses import MosesDetokenizer as _MosesDetokenizer
+
+class MosesTokenizerProcessor:
+
+    def __init__(self, src_lang, tgt_lang):
+        self._mod = 'tok'
+        self._mtk = _MosesTokenizer(lang=src_lang)
+        self._mdk = _MosesDetokenizer(lang=tgt_lang)
+
+    def get_mod(self):
+        return self._mod
+    mod = property(get_mod)
+
+    def preprocess(self, seg):
+        """ Applies the MosesTokenizer to seg.src
+        """
+        seg.src = (' ').join(self._mtk.tokenize(seg.src, escape=False))
+
+    def preprocess_str(self, str):
+        return (' ').join(self._mtk.tokenize(str, escape=False))
+
+    def postprocess(self, seg):
+        """ Applies the MosesDetokenizer to seg.tgt
+        """
+        seg.tgt = self._mdk.detokenize(seg.tgt.split(' '))
+
+    def postprocess_str(self, str):
+        return self._mdk.detokenize(str.split(' '))
