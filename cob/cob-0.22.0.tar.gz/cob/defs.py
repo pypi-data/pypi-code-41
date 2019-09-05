@@ -1,0 +1,2 @@
+COB_CONFIG_FILE_NAME = '.cob-project.yml'
+PYPI_INDEX_ENV_VAR = 'PYPI_INDEX_URL'
