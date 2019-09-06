@@ -1,0 +1,2 @@
+import sfrmaker
+import pytest
