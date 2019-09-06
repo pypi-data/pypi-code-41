@@ -1,0 +1,108 @@
+#!/usr/bin/env python
+from distutils.core import setup
+from setuptools import find_packages 
+import sys
+SCRIPTS  = ["prapi/alignPacBio.py",
+            "prapi/apa_v1.py",
+            "prapi/asas_v3.py",
+            "prapi/asas_v4_cuff.py",
+            "prapi/ati_v1.py",
+            "prapi/check_input.py",
+            "prapi/Circle.py",
+            "prapi/circle_draw.py",
+            "prapi/cleanAlignments.py",
+            "prapi/convertSam.py",
+            "prapi/DEGseq_circv1.R",
+            "prapi/de_nat_v1.py",
+            "prapi/edge.R",
+            "prapi/FDR.py",
+            "prapi/fisher.R",
+            "prapi/genemode.py",
+            "prapi/genemode_v2.py",
+            "prapi/getGeneExpr.GTF.SAM.py",
+            "prapi/gff3ToGenePred",
+            "prapi/GLM_MS_paired.py",
+            "prapi/GLM_MS_unpaired.py",
+            "prapi/human.py",
+            "prapi/joinFiles.py",
+            "prapi/joinfiles.py",
+            "prapi/m6A.py",
+            "prapi/MATS_LRT.py",
+            "prapi/MATS_LRT.sh",
+            "prapi/miss_annotation_gene.py",
+            "prapi/nat_v1.py",
+            "prapi/novel_gene.py",
+            "prapi/novel_gene_calclute.py",
+            "prapi/Pacbio.txt",
+            "prapi/Pacbio_edger.py",
+            "prapi/Pacbio_mats.py",
+            "prapi/Pacbio_mats.sh",
+            "prapi/Pacbio_mats_cuff.sh",
+            "prapi/Pacbio_mats_s2.py",
+            "prapi/Pacbio_untils_edger.py",
+            "prapi/Pacbio_v16.py",
+            "prapi/Pacbio_v16_circle.py",
+            "prapi/re,os,sys,logging,time,datetime",
+            "prapi/rm.sh",
+            "prapi/rMATS_Paired.sh",
+            "prapi/rMATS_Unpaired.sh",
+            "prapi/sam_to_gff_trim_3.py",
+            "prapi/sam_to_gff_trim_5.py",
+            "prapi/sam_to_gff_trim_none.py",
+            "prapi/setup.py",
+            "prapi/utils.py",
+            "prapi/visual_basic.py",
+            "prapi/visual_basic_all.py",
+            "prapi/de_apa_v1.py",
+            "prapi/inclusion_level.py",
+            "prapi/Pacbio.sh",
+            "prapi/rMATS.sh",
+            "prapi/visual_basic_pacbio.py",
+            "prapi/visual_circle_pacbio.py",
+            "prapi/visual_de_apa.py",
+            "prapi/visual_de_apa_all.py",
+            "prapi/visual_de_apa_pacbio.py",
+            "prapi/visual_de_as.py",
+            "prapi/visual_de_as_all.py",
+            "prapi/visual_de_as_pacbio.py",
+            "prapi/visual_de_circle_pacbio.py",
+            "prapi/visual_de_nat_all.py",
+            "prapi/visual_de_nat_pacbio.py",
+            "prapi/__init__.py",
+            "prapi/gff3ToGenePred",
+            ]
+
+PACKAGES = ['prapi']
+
+
+REQUIRES = ['SpliceGrapher',
+            'numpy',
+            'matplotlib',
+            'pysam',
+            'pycairo'
+            ]
+#gff3ToGenePred
+def readme():
+    with open('README.rst') as f:
+        return f.read()
+setup(name='prapi',
+      version='6.2.0',
+      description='Transcriptome Analysis Pipeline for Isoform Sequencing',
+      long_description= readme(),
+      author='gaoyubang',
+      author_email='1489582340@qq.com',
+      url='http://www.bioinfor.org/tool/PRAPI/',
+      packages=find_packages(),
+      requires=REQUIRES,
+      scripts=SCRIPTS,
+      license="MIT",
+      classifiers=[
+        'Development Status :: 3 - Alpha',
+        'Environment :: Console',
+        'License :: OSI Approved :: MIT License',
+        'Operating System :: POSIX',
+        'Programming Language :: Python',
+        'Topic :: Scientific/Engineering :: Bio-Informatics'
+                 ]
+)
+
