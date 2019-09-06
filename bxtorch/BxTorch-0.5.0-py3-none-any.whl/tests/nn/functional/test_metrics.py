@@ -1,0 +1,33 @@
+#
+#  nn/functional/test_metrics.py
+#  bxtorch/tests
+#
+#  Created by Oliver Borchert on June 09, 2019.
+#  Copyright (c) 2019 Oliver Borchert. All rights reserved.
+#
+
+
+import unittest
+import time
+import numpy as np
+import torch
+import sklearn.metrics as m
+import bxtorch.nn.functional as X
+
+class TestMetrics(unittest.TestCase):
+
+    def test_roc_auc_score(self):
+        for _ in range(100):
+            y_pred = np.random.uniform(size=(100,))
+            y_true = np.random.choice(2, size=(100,))
+
+            roc_pred = X.roc_auc_score(
+                torch.from_numpy(y_pred), torch.from_numpy(y_true)
+            )
+            roc_true = m.roc_auc_score(y_true, y_pred)
+
+            self.assertAlmostEqual(roc_pred, roc_true)
+
+
+if __name__ == '__main__':
+    unittest.main()
