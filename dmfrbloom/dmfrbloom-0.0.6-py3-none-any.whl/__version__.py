@@ -1,0 +1,7 @@
+__title__ = 'dmfrbloom'
+__description__ = 'Bloom filters using Python standard library'
+__url__ = 'https://github.com/droberson/dmfrbloom'
+__version__ = '0.0.1'
+__author__ = 'Daniel Roberson'
+__author_email__ = 'daniel(a)planethacker.net'
+__copyright__ = 'Copyright 2019 Daniel Roberson'
