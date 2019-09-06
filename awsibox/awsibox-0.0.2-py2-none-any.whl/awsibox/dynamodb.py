@@ -1,0 +1,34 @@
+import troposphere.dynamodb as ddb
+
+from .common import *
+from .shared import (Parameter, do_no_override, get_endvalue, get_expvalue,
+    get_subvalue, auto_get_props, get_condition)
+
+
+class DDBTableCredStash(ddb.Table):
+    def setup(self):
+        self.AttributeDefinitions = [
+            ddb.AttributeDefinition(
+                AttributeName='name',
+                AttributeType='S'
+            ),
+            ddb.AttributeDefinition(
+                AttributeName='version',
+                AttributeType='S'
+            )
+        ]
+        self.KeySchema = [
+            ddb.KeySchema(
+                AttributeName='name',
+                KeyType='HASH'
+            ),
+            ddb.KeySchema(
+                AttributeName='version',
+                KeyType='RANGE'
+            )
+        ]
+        self.ProvisionedThroughput = ddb.ProvisionedThroughput(
+            ReadCapacityUnits=1,
+            WriteCapacityUnits=1
+        )
+        self.TableName = Sub('credential-store-${EnvShort}')
