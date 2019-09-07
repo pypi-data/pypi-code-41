@@ -1,0 +1,8 @@
+__title__ = 'extractorblog'
+__description__ = 'extractor text from blog'
+__url__ = ''
+__version__ = '0.0.3'
+__author__ = 'SunJackson'
+__author_email__ = 'jacksonsunjj@gmail.com'
+__license__ = 'Apache 2.0'
+__copyright__ = 'Copyright 2019 SunJackson'
