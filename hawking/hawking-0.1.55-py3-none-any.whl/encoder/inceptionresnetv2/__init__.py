@@ -1,0 +1,1 @@
+from hawking.encoder.inceptionresnetv2.encoder import InceptionResNetV2ImageEncoder
