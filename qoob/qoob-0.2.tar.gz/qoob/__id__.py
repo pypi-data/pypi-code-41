@@ -1,0 +1,20 @@
+ID = "qoob"
+FULLNAME = "Qoob Music Player"
+HELP = ["--help, -h: Show this help message",
+        "--no-init, --quiet: Only pass the command to an existing instance",
+        "\nGeneral options",
+        "--delete: Trigger the delete event for the current media",
+        "--delete-no-confirm: Delete the current media without confirmation",
+        "--shuffle on/off: Enable/disable or toggle shuffle option",
+        "--repeat off/all/single:  Disable, change repeat mode or toggle repeat option",
+        "--clear: Clear the library view",
+        "--folder: Load music files from one or multiples folders",
+        "--file: Load one or multiples music files",
+        "--quit: Close the player",
+        "\nPlayback options",
+        "--play",
+        "--pause",
+        "--play-pause",
+        "--stop",
+        "--previous",
+        "--next"]
