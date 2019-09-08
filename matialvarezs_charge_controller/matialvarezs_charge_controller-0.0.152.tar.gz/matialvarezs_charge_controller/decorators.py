@@ -1,0 +1,4 @@
+from ohm2_handlers_light.decorators import ohm2_handlers_light_safe_request
+
+def matialvarezs_charge_controller_safe_request(function):
+	return ohm2_handlers_light_safe_request(function, "matialvarezs_charge_controller")
