@@ -1,0 +1,1 @@
+from hawking.bot.secretary.secretary import main, serve
