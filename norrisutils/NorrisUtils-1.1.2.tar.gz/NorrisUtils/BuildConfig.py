@@ -1,0 +1,2 @@
+CaptureMode = False
+DebugBackDoor = False
