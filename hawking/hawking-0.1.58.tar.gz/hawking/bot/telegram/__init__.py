@@ -1,0 +1,1 @@
+from hawking.bot.telegram.bot import main, serve
