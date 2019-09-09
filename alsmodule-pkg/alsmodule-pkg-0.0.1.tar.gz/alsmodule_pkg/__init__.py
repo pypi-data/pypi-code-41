@@ -1,0 +1,1 @@
+name='alsmodule_pkg'
