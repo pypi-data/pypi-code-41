@@ -1,0 +1,1 @@
+from obst.obst import obst, object, open_obst
