@@ -1,0 +1,3 @@
+from .distribution import plot_2d_distribution_per_category, plot_binned_distribution_per_category, plot_violinbox_plots_per_category
+from .general import scatter
+from .matrix import visualize_matrix
