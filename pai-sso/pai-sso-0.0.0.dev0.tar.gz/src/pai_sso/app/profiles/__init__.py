@@ -1,0 +1,1 @@
+default_app_config = 'pai_sso.app.profiles.apps.ProfilesConfig'
