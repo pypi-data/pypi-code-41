@@ -1,0 +1,1 @@
+default_app_config = 'pai_sso.core.apps.api_gateway.kong.apps.KongConfig'
