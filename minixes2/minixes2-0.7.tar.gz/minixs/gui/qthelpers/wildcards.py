@@ -1,0 +1,6 @@
+WILDCARD_CALIB = "Calibration Files (*.calib);;Data Files (*.dat);;Text Files (*.txt);;All Files(*)"
+WILDCARD_EXPOSURE = "TIF Files (*.tif);;All Files(*)"
+WILDCARD_XTAL = "All known types(*.xtal *.calib *.txt *.dat);;Crystal Files (*.xtal);;Calibration Files (*.calib);;Data Files (*.dat);;Text Files (*.txt);;All Files(*)"
+WILDCARD_XTAL_EXPORT = "Crystal Files (*.xtal)"
+WILDCARD_SCAN = "Scan Files (*.nnnn)|*.????|Text Files (*.txt);;All Files(*)"
+WILDCARD_XES = "XES Data Files (*.xes);;Data Files (*.dat);;Text Files (*.txt)"

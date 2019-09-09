@@ -1,0 +1,441 @@
+"""
+Exposure filters
+
+A set of filters that act on exposure pixel arrays.
+
+See the `Filter` class documentation for details on how to implement new
+filters.
+"""
+
+import numpy as np
+import logging
+from minixs import METHOD_ENTER_STR
+logger = logging.getLogger(__name__)
+
+MIN_VISIBLE_FILTER = "Min Visible"
+MAX_VISIBLE_FILTER = "Max Visible"
+LOW_CUTOFF_FILTER = "Low Cutoff"
+HIGH_CUTOFF_FILTER = "High Cutoff"
+NEIGHBORS_FILTER = "Neighbors"
+BAD_PIXELS_FILTER = "Bad Pixels"
+EMISSION_FILTER = "Emission Filter"
+
+#########################
+#                       #
+# Abstract Base Classes #
+#                       #
+#########################
+class Filter(object):
+  """
+  Abstract filter base class
+
+  Filters take an array of pixels and process them in some fashion
+
+  To implement a new filter type, create a subclass of Filter.
+
+  Set the name, default_val and default_enabled class variables.
+
+  Implement class methods `str_to_val` and `val_to_str` that convert the
+  filter's parameters between a string representation (to be saved in an
+  output file) and the internal representation (of any type).
+
+  Finally, implement the object method `filter`, which applies this filter to
+  an array of pixels (in place).
+
+  To create a filter that has only one parameter of a basic type, subclass
+  one of IntFilter, FloatFilter, or StringFilter. These already have
+  implementations of `str_to_val` and `val_to_str`.
+  """
+  name = ""
+  default_val = None
+  default_enabled = False
+
+  def __init__(self, val=None):
+    self.enabled = True
+    if val is None:
+      self.val = self.default_val
+    else:
+      self.set_val(val)
+
+    self.region = None
+
+  def filter(self, pixels, energy):
+    """
+    Apply this filter to the set regions of an array of pixels.
+    This calls `filter_region  for the portion of `pixels` that
+    was set using `set_region`.
+
+    Subclass should overrid the `filter_region` method.
+    """
+    if self.region is None:
+      self.filter_region(pixels, energy)
+    else:
+      x1,y1,x2,y2 = self.region
+      self.filter_region(pixels[y1:y2,x1:x2], energy)
+
+  def filter_region(self, pixels, energy):
+    """
+    Apply this filter to an array of pixels
+
+    This must be overridden by subclasses.
+
+    Parameters
+    ----------
+      pixels: an array of counts received at each pixel
+      energy: the incident beam energy
+    """
+    raise ValueError("Unimplemented Filter: %s" % self.name)
+
+  def set_str(self, valstr):
+    """
+    Set filter's value from a string
+    """
+    self.val = self.str_to_val(valstr)
+
+  def get_str(self):
+    """
+    Get filter's value as a string
+    """
+    return self.val_to_str(self.val)
+
+  def set_val(self, val):
+    """
+    Set filter's value
+    """
+    self.val = val
+
+  def get_val(self):
+    """
+    Get filter's value
+    """
+    return self.val
+
+  def set_region(self, region):
+    """
+    Set a rectangular region to limit this filter to
+    """
+    if not self.region_allowed:
+      raise Exception("The '%s' filter does not allow setting a region" % self.name)
+
+    self.region = region
+
+  @classmethod
+  def str_to_val(cls,valstr):
+    """
+    Convert value from string to whichever representation is used internally
+
+    This is used to load a filter from a file
+    """
+    return None
+
+  @classmethod
+  def val_to_str(cls,val):
+    """
+    Convert value from internal representation to string
+
+    This is used to save a filter to a file
+    """
+    return str(val)
+
+class IntFilter(Filter):
+  """
+  An abstract class for a filter that takes a single integer parameter
+  """
+  view_name = "IntFilterView"
+
+  @classmethod
+  def str_to_val(cls,valstr):
+    if valstr == '':
+      return 0
+    else:
+      return int(valstr)
+
+class FloatFilter(Filter):
+  """
+  An abstract class for a filter that takes a single float parameter
+  """
+  view_name = "FloatFilterView"
+
+  @classmethod
+  def val_to_str(cls,val):
+    return "%.2f" % val
+
+  @classmethod
+  def str_to_val(cls,valstr):
+    if valstr == '':
+      return 0
+    else:
+      return float(valstr)
+
+class StringFilter(Filter):
+  """
+  An abstract class for a filter that takes a single string parameter
+  """
+  view_name = "StringFilterView"
+
+  @classmethod
+  def val_to_str(cls,val):
+    return val
+
+class ChoiceFilter(Filter):
+  """
+  An abstract class for a filter that has a single parameter chosen from a set
+
+  Subclasses should override the `CHOICES` class variable with a list of
+  strings values of possible choices.
+
+  The `val` object variable will be set to the index of the selected choice.
+  """
+  view_name = "ChoiceFilterView"
+  default_value = 0
+
+  CHOICES = [
+      ]
+
+  @classmethod
+  def val_to_str(cls,val):
+    if val == -1:
+      return ''
+
+    try:
+      return cls.CHOICES[val]
+    except IndexError:
+      return ''
+
+  @classmethod
+  def str_to_val(cls,valstr):
+    if valstr == '':
+      return -1
+
+    return cls.CHOICES.index(valstr)
+
+##################
+#                #
+# Actual Filters #
+#                #
+##################
+
+class MinFilter(IntFilter):
+  """
+  A dummy filter used by the Calibrator GUI to set the lower contrast level to show
+  """
+  name = MIN_VISIBLE_FILTER
+  view_name = "IntFilterView"
+  default_val = 0
+  default_enabled = True
+  region_allowed = False
+
+  def filter_region(self, pixels, energy):
+    pass
+
+class MaxFilter(IntFilter):
+  """
+  A dummy filter used by the Calibrator GUI to set the upper contrast level to show
+  """
+  name = MAX_VISIBLE_FILTER
+  view_name = "IntFilterView"
+  default_val = 1000
+  default_enabled = False
+  region_allowed = False
+
+  def filter_region(self, pixels, energy):
+    pass
+
+class LowFilter(IntFilter):
+  """
+  Zero out all pixels below a given threshold
+  """
+  name = LOW_CUTOFF_FILTER
+  default_val = 5
+  default_enabled = True
+  region_allowed = True
+
+  def filter_region(self, pixels, energy):
+    logger.debug(METHOD_ENTER_STR, ((self.name, pixels, energy,self.val)))
+    if self.val is None:
+      return
+    pixels[np.where(pixels < self.val)] = 0
+
+class HighFilter(IntFilter):
+  """
+  Zero out all pixels above a given threshold
+  """
+  name = HIGH_CUTOFF_FILTER
+  default_val = 1000
+  default_enabled = False
+  region_allowed = True
+
+  def filter_region(self, pixels, energy):
+    logger.debug(METHOD_ENTER_STR, ((self.name, pixels, energy, self.val)))
+    if self.val is None:
+      return
+    pixels[np.where(pixels > self.val)] = 0
+
+class NeighborFilter(IntFilter):
+  """
+  Zero out all pixels with fewer than the given number of nonzero neighbors
+
+  A neighbor is defined as a pixel whose row and column are within one of the
+  pixel under consideration, not including the pixel itself. Each pixel has 8
+  neighbors.
+  """
+  name = NEIGHBORS_FILTER
+  default_val = 2
+  default_enabled = True
+  region_allowed = True
+
+  def filter_region(self, pixels, energy):
+    logger.debug(METHOD_ENTER_STR, ((self.name, pixels, energy,self.val)))
+    from itertools import product
+    nbors = (-1,0,1)
+    mask = np.sum([
+      np.roll(np.roll(pixels > 0,i,0),j,1)
+      for i,j in product(nbors,nbors)
+      if i != 0 or j != 0
+      ], 0) >= self.val 
+    pixels *= mask
+
+class BadPixelFilter(Filter):
+  """
+  Filter out a set of specified pixels
+
+  Each pixel in the provided list is processed in manner which depends on the
+  mode:
+
+    0: Zero out pixels
+    1: Linearly interpolate value from pixels to left and right
+    2: Linearly interpolate value from pixels above and below
+  """
+
+  name = BAD_PIXELS_FILTER
+
+  default_val = (0,[])
+  default_enabled = False
+  region_allowed = False
+
+  MODE_ZERO_OUT = 0
+  MODE_INTERP_H = 1
+  MODE_INTERP_V = 2
+
+  @classmethod
+  def str_to_val(cls, valstr):
+    tmp = valstr.split('|')
+    if len(tmp) == 2:
+      mode = int(tmp[0])
+      pts = tmp[1].split(';')
+      bad_pixels = [[int(c.strip()) for c in pt.split(',')] for pt in pts]
+      return (mode, bad_pixels)
+    else:
+      raise Exception("Invalid filter value: %s" % valstr)
+
+  @classmethod
+  def val_to_str(cls, val):
+    mode, points = val
+    points = ';'.join(['%d,%d' % tuple(p) for p in points])
+    return '%d|%s' % (mode, points)
+
+  def filter(self, pixels, energy):
+    mode, bad_pixels = self.val
+    for x,y in bad_pixels:
+      if mode == self.MODE_ZERO_OUT:
+        pixels[y,x] = 0
+      elif mode == self.MODE_INTERP_H:
+        pixels[y,x] = (pixels[y,x-1] + pixels[y,x+1])/2.
+      elif mode == self.MODE_INTERP_V:
+        pixels[y,x] = (pixels[y-1,x] + pixels[y+1,x])/2.
+
+class EmissionFilter(ChoiceFilter):
+  """
+  A filter to remove fluorescence from elastic exposures
+
+  This is hard coded to only handle the Fe Kbeta von Hamos
+  spectrometer. At some point, this should be replaced
+  by something more flexible.
+  """
+  name = EMISSION_FILTER
+
+  TYPE_FE_KBETA = 0
+  TYPE_FE_KBETA_TIGHT = 1
+  CHOICES = [
+      "Fe Kbeta",
+      "Fe Kbeta v2"
+      ]
+
+  default_val = TYPE_FE_KBETA
+  default_enabled = False
+  region_allowed = False
+
+  def filter(self, pixels, energy):
+    if self.val == self.TYPE_FE_KBETA:
+      if energy >= 7090:
+        z = 1.3214 * energy - 9235.82 - 12
+        pixels[0:z,:] = 0
+    elif self.val == self.TYPE_FE_KBETA_TIGHT:
+      m = [ 1.267343, 1.265995, 1.267343, 1.275763, 1.258217, 1.254672, 1.254672, 1.267664, 1.304953, 1.289443 ]
+      b = [ -8847.35, -8846.56, -8849.35, -8913.20, -8790.86, -8762.06, -8761.06, -8847.43, -9109.12, -9006.66 ]
+      w = pixels.shape[1]
+
+      if energy >= 7090:
+        for i in range(10):
+          x1 = np.floor(w / 10.0 * i)
+          x2 = np.ceil(w / 10.0 * (i+1))
+          z = m[i] * energy + b[i] - 1
+          pixels[0:z,x1:x2] = 0
+    else:
+      raise ValueError("Unimplemented Emission Filter")
+
+
+###################
+#                 #
+# Filter Registry #
+#                 #
+###################
+
+REGISTRY = []
+FILTER_MAP = {}
+
+
+def get_filter_by_name(name):
+  """
+  Lookup filter by name
+
+  Parameters
+  ----------
+    name: the name of the filter
+
+  Returns
+  -------
+    an instantiated filter object of the given type or None if name is unknown
+  """
+
+  global FILTER_MAP
+  fltr = FILTER_MAP.get(name, None)
+  if fltr is None:
+    return None
+  else:
+    return fltr()
+
+def register(f):
+  """
+  Register a filter
+
+  Parameters
+  ----------
+    f: a class derived from Filter
+  """
+  FILTER_MAP[f.name] = f
+  REGISTRY.append(f)
+  
+
+# register standard filters
+FILTERS = [
+  MinFilter,
+  MaxFilter,
+  LowFilter,
+  HighFilter,
+  NeighborFilter,
+  BadPixelFilter,
+  EmissionFilter
+  ]
+for f in FILTERS:
+  register(f)
