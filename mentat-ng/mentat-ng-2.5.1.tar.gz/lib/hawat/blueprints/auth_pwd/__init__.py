@@ -1,0 +1,257 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+#-------------------------------------------------------------------------------
+# This file is part of Mentat system (https://mentat.cesnet.cz/).
+#
+# Copyright (C) since 2011 CESNET, z.s.p.o (http://www.ces.net/)
+# Use of this source is governed by the MIT license, see LICENSE file.
+#-------------------------------------------------------------------------------
+
+
+"""
+Description
+--------------------------------------------------------------------------------
+
+This pluggable module provides classical web login form with password authentication
+method.
+
+
+Provided endpoints
+--------------------------------------------------------------------------------
+
+``/auth_pwd/login``
+    Page providing classical web login form.
+
+    * *Authentication:* no authentication
+    * *Methods:* ``GET``, ``POST``
+"""
+
+
+__author__ = "Jan Mach <jan.mach@cesnet.cz>"
+__credits__ = "Pavel Kácha <pavel.kacha@cesnet.cz>, Andrea Kropáčová <andrea.kropacova@cesnet.cz>"
+
+
+import sys
+import datetime
+import traceback
+import sqlalchemy
+
+#
+# Flask related modules.
+#
+import flask
+import flask_login
+import flask_principal
+from flask_babel import gettext, lazy_gettext
+
+#
+# Custom modules.
+#
+from mentat.datatype.sqldb import UserModel
+import hawat.const
+import hawat.forms
+from hawat.base import HTMLMixin, SQLAlchemyMixin, SimpleView, HawatBlueprint
+from hawat.blueprints.auth_pwd.forms import LoginForm
+
+
+BLUEPRINT_NAME = 'auth_pwd'
+"""Name of the blueprint as module global constant."""
+
+
+class LoginView(HTMLMixin, SQLAlchemyMixin, SimpleView):
+    """
+    View enabling classical password login.
+    """
+    methods = ['GET', 'POST']
+
+    is_sign_in = True
+
+    @classmethod
+    def get_view_name(cls):
+        """*Implementation* of :py:func:`hawat.base.BaseView.get_view_name`."""
+        return 'login'
+
+    @classmethod
+    def get_view_icon(cls):
+        """*Implementation* of :py:func:`hawat.base.BaseView.get_view_icon`."""
+        return 'login'
+
+    @classmethod
+    def get_view_title(cls, **kwargs):
+        """*Implementation* of :py:func:`hawat.base.BaseView.get_view_title`."""
+        return lazy_gettext('Password login')
+
+    @classmethod
+    def get_menu_title(cls, **kwargs):
+        """*Implementation* of :py:func:`hawat.base.BaseView.get_menu_title`."""
+        return lazy_gettext('Login (pwd)')
+
+    @property
+    def dbmodel(self):
+        """*Implementation* of :py:func:`hawat.base.SQLAlchemyMixin.dbmodel`."""
+        return UserModel
+
+    @property
+    def search_by(self):
+        """*Implementation* of :py:func:`hawat.base.SQLAlchemyMixin.search_by`."""
+        return self.dbmodel.login
+
+    def dispatch_request(self):
+        """
+        Mandatory interface required by the :py:func:`flask.views.View.dispatch_request`.
+        Will be called by the *Flask* framework to service the request.
+        """
+        if flask_login.current_user.is_authenticated:
+            return self.redirect(
+                default_url = flask.url_for(
+                    flask.current_app.config['hawat_LOGIN_REDIRECT']
+                )
+            )
+
+        form = LoginForm()
+        if form.validate_on_submit():
+            try:
+                user = self.fetch(form.login.data)
+
+                # Check for password validity.
+                if user.check_password(form.password.data):
+
+                    # User account must be enabled.
+                    if not user.enabled:
+                        self.flash(
+                            flask.Markup(gettext(
+                                'Your user account <strong>%(login)s (%(name)s)</strong> is currently disabled, you are not permitted to log in.',
+                                login = user.login,
+                                name = user.fullname
+                            )),
+                            hawat.const.HAWAT_FLASH_FAILURE
+                        )
+                        self.abort(403)
+
+                    flask_login.login_user(user)
+
+                    # Mark the login time into database.
+                    user.logintime = datetime.datetime.utcnow()
+                    self.dbsession.commit()
+
+                    # Tell Flask-Principal the identity changed. Access to private method
+                    # _get_current_object is according to the Flask documentation:
+                    #   http://flask.pocoo.org/docs/1.0/reqcontext/#notes-on-proxies
+                    flask_principal.identity_changed.send(
+                        flask.current_app._get_current_object(),   # pylint: disable=locally-disabled,protected-access
+                        identity = flask_principal.Identity(user.get_id())
+                    )
+
+                    self.flash(
+                        flask.Markup(gettext(
+                            'You have been successfully logged in as <strong>%(login)s (%(name)s)</strong>.',
+                            login = user.login,
+                            name = user.fullname
+                        )),
+                        hawat.const.HAWAT_FLASH_SUCCESS
+                    )
+                    self.logger.info(
+                        "User '{}' successfully logged in with 'auth_pwd'.".format(
+                            user.login
+                        )
+                    )
+
+                    # Redirect user back to original page.
+                    return self.redirect(
+                        default_url = flask.url_for(
+                            flask.current_app.config['hawat_LOGIN_REDIRECT']
+                        )
+                    )
+
+                # Warn about invalid credentials in case of invalid password. Do
+                # not say specifically it was password, that was invalid.
+                self.flash(
+                    gettext('You have entered wrong login credentials.'),
+                    hawat.const.HAWAT_FLASH_FAILURE
+                )
+
+            except sqlalchemy.orm.exc.MultipleResultsFound:
+                self.logger.error(
+                    "Multiple results found for user login '{}'.".format(
+                        form.login.data
+                    )
+                )
+                self.abort(500)
+
+            except sqlalchemy.orm.exc.NoResultFound:
+                self.flash(
+                    gettext('You have entered wrong login credentials.'),
+                    hawat.const.HAWAT_FLASH_FAILURE
+                )
+
+            except Exception:  # pylint: disable=locally-disabled,broad-except
+                self.flash(
+                    flask.Markup(gettext(
+                        "Unable to perform password login as <strong>%(user)s</strong>.",
+                        user = str(form.login.data)
+                    )),
+                    hawat.const.HAWAT_FLASH_FAILURE
+                )
+                flask.current_app.log_exception_with_label(
+                    traceback.TracebackException(*sys.exc_info()),
+                    'Unable to perform password login.',
+                )
+
+        self.response_context.update(
+            form = form,
+            next = hawat.forms.get_redirect_target()
+        )
+        return self.generate_response()
+
+
+#-------------------------------------------------------------------------------
+
+
+class PwdAuthBlueprint(HawatBlueprint):
+    """
+    Pluggable module - classical password authentication (*auth_pwd*).
+    """
+
+    @classmethod
+    def get_module_title(cls):
+        """*Implementation* of :py:func:`hawat.base.HawatBlueprint.get_module_title`."""
+        return gettext('Password authentication service')
+
+    def register_app(self, app):
+        """
+        *Callback method*. Will be called from :py:func:`hawat.base.HawatApp.register_blueprint`
+        method and can be used to customize the Flask application object. Possible
+        use cases:
+
+        * application menu customization
+
+        :param hawat.base.HawatApp app: Flask application to be customize.
+        """
+        app.menu_anon.add_entry(
+            'view',
+            'login_pwd',
+            position = 10,
+            view = LoginView,
+            hidelegend = True
+        )
+
+
+#-------------------------------------------------------------------------------
+
+
+def get_blueprint():
+    """
+    Mandatory interface and factory function. This function must return a valid
+    instance of :py:class:`hawat.base.hawatBlueprint` or :py:class:`flask.Blueprint`.
+    """
+
+    hbp = PwdAuthBlueprint(
+        BLUEPRINT_NAME,
+        __name__,
+        template_folder = 'templates',
+        url_prefix = '/{}'.format(BLUEPRINT_NAME)
+    )
+
+    hbp.register_view_class(LoginView, '/login')
+
+    return hbp
