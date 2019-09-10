@@ -1,0 +1,2 @@
+class ElmwareError(Exception):
+    pass
