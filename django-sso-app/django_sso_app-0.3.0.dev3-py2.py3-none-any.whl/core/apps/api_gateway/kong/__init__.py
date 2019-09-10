@@ -1,0 +1,1 @@
+default_app_config = 'django_sso_app.core.apps.api_gateway.kong.apps.KongConfig'
