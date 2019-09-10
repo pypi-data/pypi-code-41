@@ -1,0 +1,1 @@
+default_app_config = 'django_sso_app.core.apps.devices.apps.DevicesConfig'
