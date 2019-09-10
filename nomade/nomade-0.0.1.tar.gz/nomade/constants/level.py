@@ -1,0 +1,5 @@
+DEBUG = 'white'
+INFO = 'cyan'
+SUCCESS = 'green'
+WARNING = 'yellow'
+ERROR = 'red'
