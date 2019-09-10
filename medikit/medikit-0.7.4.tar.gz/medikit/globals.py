@@ -1,0 +1,2 @@
+PIP_VERSION = "~=19.0,<19.2"
+LINE_LENGTH = "120"
