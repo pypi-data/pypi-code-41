@@ -1,0 +1,1 @@
+def read(code, start, end):
