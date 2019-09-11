@@ -1,0 +1,14 @@
+from setuptools import setup, find_packages
+
+setup(
+    name='tempocalculation',
+    version='0.2',
+    packages=find_packages(exclude=['tests*']),
+    license='GNU',
+    description='A package to retrieve Scholarly Metadata',
+    long_description=open('README.md').read(),
+    install_requires=['numpy'],
+    url='https://github.com/ameyakarnad/ameya-sample-package',
+    author='Edlab',
+    author_email='ameyakarnadbvb@gmail.com'
+)
