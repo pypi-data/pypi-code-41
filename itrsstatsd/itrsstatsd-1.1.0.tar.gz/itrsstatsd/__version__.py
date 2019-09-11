@@ -1,0 +1,8 @@
+__title__ = 'ITRS statsd'
+__description__ = 'ITRS statsd client.'
+__url__ = 'https://resources.itrsgroup.com/'
+__version__ = '0.1'
+__author__ = 'ITRS Group Ltd'
+__author_email__ = 'support@itrsgroup.com'
+__license__ = 'ITRS Commercial'
+__copyright__ = 'Copyright (C) 2019 ITRS Group Ltd. All rights reserved.'
