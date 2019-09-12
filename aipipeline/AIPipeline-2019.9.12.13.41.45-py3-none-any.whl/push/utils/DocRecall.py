@@ -1,0 +1,44 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# @Project      : AIPipeline.
+# @File         : DocRecall
+# @Time         : 2019-09-12 10:25
+# @Author       : yuanjie
+# @Email        : yuanjie@xiaomi.com
+# @Software     : PyCharm
+# @Description  : 
+
+import pandas as pd
+from concurrent.futures import ThreadPoolExecutor
+
+"""
+cmshot
+historyhighctr
+topnewsctr
+hotchannel
+"""
+
+
+class DocRecall(object):
+
+    def __init__(self):
+        pass
+
+    def doc_set(self, queues=["cmshot", 'historyhighctr', 'topnewsctr', 'hotchannel']):
+        with ThreadPoolExecutor(8) as pool:
+            df = pd.concat(pool.map(self._get_docid, queues, timeout=10))
+            return df[10].drop_duplicates().to_list()
+
+    def _get_docid(self, queue='cmshot'):
+        try:
+            url = f"http://web.algo.browser.miui.srv/data/feed/recall?q={queue}"
+            df = pd.read_html(url, encoding='utf-8')[0][[1, 10]]
+        except Exception as e:
+            print(e)
+            df = pd.DataFrame()
+        return df
+
+
+if __name__ == '__main__':
+    print(DocRecall()._get_docid())
+    print(DocRecall().doc_set())
